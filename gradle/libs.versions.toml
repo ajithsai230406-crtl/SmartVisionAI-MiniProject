@@ -1,6 +1,7 @@
 [versions]
 agp                     = "8.7.3"
 kotlin                  = "2.0.21"
+appcompat               = "1.7.1"
 coreKtx                 = "1.12.0"
 lifecycle               = "2.7.0"
 activityCompose         = "1.8.2"
@@ -29,6 +30,7 @@ espresso                = "3.5.1"
 
 [libraries]
 # Core
+androidx-appcompat              = { group = "androidx.appcompat",         name = "appcompat",                   version.ref = "appcompat" }
 androidx-core-ktx               = { group = "androidx.core",              name = "core-ktx",                    version.ref = "coreKtx" }
 androidx-lifecycle-runtime      = { group = "androidx.lifecycle",          name = "lifecycle-runtime-ktx",        version.ref = "lifecycle" }
 androidx-lifecycle-viewmodel    = { group = "androidx.lifecycle",          name = "lifecycle-viewmodel-compose",  version.ref = "lifecycle" }

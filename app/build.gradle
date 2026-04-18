@@ -7,11 +7,11 @@ plugins {
 }
 
 android {
-    namespace 'com.smartvision.ai'
+    namespace 'com.example.smartvisionai'
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.smartvision.ai"
+        applicationId "com.example.smartvisionai"
         minSdk 26
         targetSdk 34
         versionCode 1
@@ -48,6 +48,7 @@ android {
 
 dependencies {
     // --- Core ---
+    implementation libs.androidx.appcompat
     implementation libs.androidx.core.ktx
     implementation libs.androidx.lifecycle.runtime
     implementation libs.androidx.activity.compose

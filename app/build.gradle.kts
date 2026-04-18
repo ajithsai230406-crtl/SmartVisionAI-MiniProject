@@ -4,7 +4,9 @@ plugins {
     alias(libs.plugins.hilt)
     alias(libs.plugins.kotlin.kapt)
 }
-
+buildFeatures {
+    buildConfig = true
+}
 android {
     namespace   = "com.example.smartvisionai"
     compileSdk  = 34
