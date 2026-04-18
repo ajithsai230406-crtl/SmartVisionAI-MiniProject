@@ -1,0 +1,112 @@
+[versions]
+agp                     = "8.7.3"
+kotlin                  = "2.0.21"
+coreKtx                 = "1.12.0"
+lifecycle               = "2.7.0"
+activityCompose         = "1.8.2"
+composeBom              = "2024.04.01"
+navigationCompose       = "2.7.6"
+hilt                    = "2.52"
+hiltNavigationCompose   = "1.1.0"
+room                    = "2.6.1"
+datastore               = "1.0.0"
+camerax                 = "1.3.1"
+mlkitTextRecognition    = "16.0.0"
+mlkitObjectDetection    = "17.0.1"
+mlkitImageLabeling      = "17.0.8"
+mlkitLanguageId         = "17.0.5"
+mlkitTranslate          = "17.0.2"
+tensorflowLite          = "2.13.0"
+tensorflowLiteSupport   = "0.4.4"
+tensorflowLiteTask      = "0.4.4"
+gemini                  = "0.2.2"
+coil                    = "2.5.0"
+accompanistPermissions  = "0.33.2-alpha"
+coroutines              = "1.7.3"
+junit                   = "4.13.2"
+junitExt                = "1.1.5"
+espresso                = "3.5.1"
+
+[libraries]
+# Core
+androidx-core-ktx               = { group = "androidx.core",              name = "core-ktx",                    version.ref = "coreKtx" }
+androidx-lifecycle-runtime      = { group = "androidx.lifecycle",          name = "lifecycle-runtime-ktx",        version.ref = "lifecycle" }
+androidx-lifecycle-viewmodel    = { group = "androidx.lifecycle",          name = "lifecycle-viewmodel-compose",  version.ref = "lifecycle" }
+androidx-activity-compose       = { group = "androidx.activity",           name = "activity-compose",             version.ref = "activityCompose" }
+
+# Compose BOM
+androidx-compose-bom            = { group = "androidx.compose",            name = "compose-bom",                  version.ref = "composeBom" }
+androidx-compose-ui             = { group = "androidx.compose.ui",         name = "ui" }
+androidx-compose-ui-graphics    = { group = "androidx.compose.ui",         name = "ui-graphics" }
+androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui",    name = "ui-tooling-preview" }
+androidx-compose-ui-tooling     = { group = "androidx.compose.ui",         name = "ui-tooling" }
+androidx-compose-ui-test        = { group = "androidx.compose.ui",         name = "ui-test-manifest" }
+androidx-compose-material3      = { group = "androidx.compose.material3",  name = "material3" }
+androidx-compose-material-icons = { group = "androidx.compose.material",   name = "material-icons-extended" }
+androidx-compose-animation      = { group = "androidx.compose.animation",  name = "animation" }
+androidx-compose-foundation     = { group = "androidx.compose.foundation", name = "foundation" }
+
+# Navigation
+androidx-navigation-compose     = { group = "androidx.navigation",         name = "navigation-compose",           version.ref = "navigationCompose" }
+
+# CameraX
+androidx-camera-core            = { group = "androidx.camera",             name = "camera-core",                  version.ref = "camerax" }
+androidx-camera-camera2         = { group = "androidx.camera",             name = "camera-camera2",               version.ref = "camerax" }
+androidx-camera-lifecycle       = { group = "androidx.camera",             name = "camera-lifecycle",             version.ref = "camerax" }
+androidx-camera-view            = { group = "androidx.camera",             name = "camera-view",                  version.ref = "camerax" }
+androidx-camera-extensions      = { group = "androidx.camera",             name = "camera-extensions",            version.ref = "camerax" }
+
+# ML Kit
+mlkit-text-recognition          = { group = "com.google.mlkit",            name = "text-recognition",             version.ref = "mlkitTextRecognition" }
+mlkit-object-detection          = { group = "com.google.mlkit",            name = "object-detection",             version.ref = "mlkitObjectDetection" }
+mlkit-image-labeling            = { group = "com.google.mlkit",            name = "image-labeling",               version.ref = "mlkitImageLabeling" }
+mlkit-language-id               = { group = "com.google.mlkit",            name = "language-id",                  version.ref = "mlkitLanguageId" }
+mlkit-translate                 = { group = "com.google.mlkit",            name = "translate",                    version.ref = "mlkitTranslate" }
+
+# TensorFlow Lite
+tensorflow-lite                 = { group = "org.tensorflow",              name = "tensorflow-lite",              version.ref = "tensorflowLite" }
+tensorflow-lite-support         = { group = "org.tensorflow",              name = "tensorflow-lite-support",      version.ref = "tensorflowLiteSupport" }
+tensorflow-lite-metadata        = { group = "org.tensorflow",              name = "tensorflow-lite-metadata",     version.ref = "tensorflowLiteSupport" }
+tensorflow-lite-task-vision     = { group = "org.tensorflow",              name = "tensorflow-lite-task-vision",  version.ref = "tensorflowLiteTask" }
+
+# Gemini
+gemini-generativeai             = { group = "com.google.ai.client.generativeai", name = "generativeai",          version.ref = "gemini" }
+
+# Hilt
+hilt-android                    = { group = "com.google.dagger",           name = "hilt-android",                 version.ref = "hilt" }
+hilt-compiler                   = { group = "com.google.dagger",           name = "hilt-android-compiler",        version.ref = "hilt" }
+hilt-navigation-compose         = { group = "androidx.hilt",               name = "hilt-navigation-compose",      version.ref = "hiltNavigationCompose" }
+
+# Room
+androidx-room-runtime           = { group = "androidx.room",               name = "room-runtime",                 version.ref = "room" }
+androidx-room-ktx               = { group = "androidx.room",               name = "room-ktx",                     version.ref = "room" }
+androidx-room-compiler          = { group = "androidx.room",               name = "room-compiler",                version.ref = "room" }
+
+# DataStore
+androidx-datastore-preferences  = { group = "androidx.datastore",          name = "datastore-preferences",        version.ref = "datastore" }
+
+# Coil
+coil-compose                    = { group = "io.coil-kt",                  name = "coil-compose",                 version.ref = "coil" }
+
+# Accompanist
+accompanist-permissions         = { group = "com.google.accompanist",      name = "accompanist-permissions",      version.ref = "accompanistPermissions" }
+
+# Coroutines
+kotlinx-coroutines-android      = { group = "org.jetbrains.kotlinx",       name = "kotlinx-coroutines-android",   version.ref = "coroutines" }
+
+# ExifInterface
+androidx-exifinterface          = { group = "androidx.exifinterface",      name = "exifinterface",                version = "1.3.6" }
+
+# Test
+junit                           = { group = "junit",                       name = "junit",                        version.ref = "junit" }
+androidx-junit                  = { group = "androidx.test.ext",           name = "junit",                        version.ref = "junitExt" }
+androidx-espresso               = { group = "androidx.test.espresso",      name = "espresso-core",                version.ref = "espresso" }
+
+[plugins]
+android-application             = { id = "com.android.application",            version.ref = "agp" }
+android-library                 = { id = "com.android.library",                version.ref = "agp" }
+kotlin-android                  = { id = "org.jetbrains.kotlin.android",        version.ref = "kotlin" }
+kotlin-compose                  = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+hilt                            = { id = "com.google.dagger.hilt.android",      version.ref = "hilt" }
+kotlin-kapt                     = { id = "org.jetbrains.kotlin.kapt",           version.ref = "kotlin" }
+google-services                 = { id = "com.google.gms.google-services",      version = "4.4.2" }

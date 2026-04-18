@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Smart Vision AI</string>
+
+    <!-- Scan Modes -->
+    <string name="mode_object">Object Detect</string>
+    <string name="mode_ocr">OCR / Text</string>
+    <string name="mode_translate">Translate</string>
+    <string name="mode_student">Student Help</string>
+    <string name="mode_medical">Medical</string>
+    <string name="mode_waste">Waste Classify</string>
+
+    <!-- Permissions -->
+    <string name="permission_camera_title">Camera Access Required</string>
+    <string name="permission_camera_message">Smart Vision AI needs camera access to detect objects, scan text, and identify items.</string>
+    <string name="permission_mic_title">Microphone Access</string>
+    <string name="permission_mic_message">Enable microphone for voice commands and voice answers.</string>
+    <string name="permission_grant">Grant Permission</string>
+    <string name="permission_denied">Permission Dismissed</string>
+
+    <!-- UI Labels -->
+    <string name="scan_mode_title">SCAN MODE</string>
+    <string name="history_title">HISTORY</string>
+    <string name="history_subtitle">Your recent scans</string>
+    <string name="settings_title">SETTINGS</string>
+    <string name="settings_subtitle">Configure your experience</string>
+    <string name="modules_label">MODULES</string>
+
+    <!-- Actions -->
+    <string name="start_scanning">START SCANNING</string>
+    <string name="ask_placeholder">Ask anything about scanned content…</string>
+    <string name="back">Back</string>
+    <string name="result_label">RESULT</string>
+
+    <!-- Settings -->
+    <string name="voice_commands">Voice Commands</string>
+    <string name="voice_commands_sub">Control app with voice</string>
+    <string name="text_to_speech">Text-to-Speech</string>
+    <string name="text_to_speech_sub">Speak detected text aloud</string>
+    <string name="default_language">Default Language</string>
+    <string name="performance_mode">Performance Mode</string>
+    <string name="power_saver">Power Saver</string>
+    <string name="balanced">Balanced</string>
+    <string name="performance">Performance</string>
+    <string name="ai_model">AI Model</string>
+    <string name="offline_packs">Offline Packs</string>
+    <string name="notifications">Notifications</string>
+    <string name="notifications_sub">Scan alerts &amp; updates</string>
+    <string name="version">Version</string>
+
+    <!-- Hero Section -->
+    <string name="hero_title">SMART VISION</string>
+    <string name="hero_subtitle">AI-POWERED RECOGNITION</string>
+    <string name="hero_description">Point your camera at anything — detect objects,\nread text, translate, and more.</string>
+
+    <!-- Errors -->
+    <string name="error_no_text">No text found in the image.</string>
+    <string name="error_no_objects">No objects detected. Try a clearer image.</string>
+    <string name="error_offline">You\'re offline. Some features require internet.</string>
+    <string name="error_api_key">Gemini API key not configured. Please add your key in build.gradle.</string>
+</resources>

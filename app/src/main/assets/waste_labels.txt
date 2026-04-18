@@ -1,0 +1,15 @@
+plastic_bottle
+plastic_bag
+cardboard
+glass_bottle
+metal_can
+paper
+food_waste
+organic_material
+electronic_waste
+battery
+clothing
+mixed_waste
+styrofoam
+rubber
+wood
