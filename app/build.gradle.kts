@@ -3,16 +3,18 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.hilt)
     alias(libs.plugins.kotlin.kapt)
+    id("com.android.application")
+    id("com.google.gms.google-services")
 }
 buildFeatures {
     buildConfig = true
 }
 android {
-    namespace   = "com.example.smartvisionai"
+    namespace = "com.smartvision.ai"
     compileSdk  = 34
 
     defaultConfig {
-        applicationId   = "com.example.smartvisionai"
+        applicationId = "com.smartvision.ai"
         minSdk          = 24
         targetSdk       = 34
         versionCode     = 1
@@ -64,6 +66,10 @@ android {
 }
 
 dependencies {
+    // — Firebase —
+    implementation(platform("com.google.firebase:firebase-bom:33.0.0"))
+    implementation("com.google.firebase:firebase-database-ktx")
+    implementation("com.google.firebase:firebase-analytics-ktx")
     // ── Core ─────────────────────────────────────────────────────────────────
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime)

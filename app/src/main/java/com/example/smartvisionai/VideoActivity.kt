@@ -1,27 +1,19 @@
 package com.example.smartvisionai
 
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
-import android.widget.VideoView
 import androidx.appcompat.app.AppCompatActivity
 
+/**
+ * VideoActivity is currently disabled because the required video resource (R.raw.intro) is missing.
+ * The app now uses SplashActivity (Compose-based) as the launcher.
+ */
 class VideoActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_video)
-
-        val videoView = findViewById<VideoView>(R.id.videoView)
-
-        val uri = Uri.parse("android.resource://" + packageName + "/" + R.raw.intro)
-        videoView.setVideoURI(uri)
-
-        videoView.setOnCompletionListener {
-            startActivity(Intent(this, MainActivity::class.java))
-            finish()
-        }
-
-        videoView.start()
+        // Redirect to MainActivity since this activity is missing its video resource
+        startActivity(Intent(this, MainActivity::class.java))
+        finish()
     }
 }
