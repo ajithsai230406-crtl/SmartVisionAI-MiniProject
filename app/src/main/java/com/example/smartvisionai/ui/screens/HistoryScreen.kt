@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.smartvisionai.data.model.ScanHistoryEntity
+import com.example.smartvisionai.ui.components.ModuleIcon
 import com.example.smartvisionai.ui.theme.*
 import com.example.smartvisionai.viewmodel.HistoryViewModel
 

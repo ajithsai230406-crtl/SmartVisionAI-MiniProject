@@ -64,6 +64,38 @@ fun SmartCard(
 }
 
 /**
+ * Icon for a specific module, using text/emoji.
+ */
+@Composable
+fun ModuleIcon(moduleId: String, color: Color, modifier: Modifier = Modifier) {
+    val iconText = when (moduleId) {
+        "object"    -> "👁"
+        "ocr"       -> "T"
+        "translate" -> "文A"
+        "student"   -> "🎓"
+        "medical"   -> "💊"
+        "waste"     -> "♻"
+        else        -> "👁"
+    }
+
+    if (iconText == "T") {
+        Text(
+            text = iconText,
+            color = color,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = modifier
+        )
+    } else {
+        Text(
+            text = iconText,
+            fontSize = 18.sp,
+            modifier = modifier
+        )
+    }
+}
+
+/**
  * Section header label used in detail screens.
  */
 @Composable

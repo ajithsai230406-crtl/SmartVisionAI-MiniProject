@@ -9,7 +9,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import com.example.smartvisionai.ui.theme.SmartVisionTheme
 import dagger.hilt.android.AndroidEntryPoint
-import com.example.smartvisionai.BuildConfig
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
