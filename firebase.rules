@@ -1,0 +1,50 @@
+// ============================================================
+// firestore.rules  — paste into Firebase Console → Firestore
+// ============================================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Scan history ─────────────────────────────────────────
+    // Users can only read/write their own scan history
+    match /scan_history/{docId} {
+      allow read, write: if request.auth != null
+                         && request.auth.uid == resource.data.userId;
+      allow create: if request.auth != null
+                    && request.auth.uid == request.resource.data.userId
+                    && request.resource.data.keys().hasAll(['id','userId','moduleType','summary','timestampMillis']);
+      allow delete: if request.auth != null
+                    && request.auth.uid == resource.data.userId;
+    }
+
+    // ── User profile ──────────────────────────────────────────
+    match /users/{userId} {
+      allow read:  if request.auth != null && request.auth.uid == userId;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // ── Default deny everything else ──────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
+// ============================================================
+// storage.rules  — paste into Firebase Console → Storage
+// ============================================================
+
+// rules_version = '2';
+// service firebase.storage {
+//   match /b/{bucket}/o {
+//     match /users/{userId}/scans/{imageId} {
+//       allow read:  if request.auth != null && request.auth.uid == userId;
+//       allow write: if request.auth != null
+//                    && request.auth.uid == userId
+//                    && request.resource.size < 10 * 1024 * 1024   // max 10MB
+//                    && request.resource.contentType.matches('image/.*');
+//       allow delete: if request.auth != null && request.auth.uid == userId;
+//     }
+//   }
+// }

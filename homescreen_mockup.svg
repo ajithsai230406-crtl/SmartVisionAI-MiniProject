@@ -1,0 +1,324 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 900" width="420" height="900" style="background:#000">
+  <defs>
+    <!-- Phone body gradient -->
+    <linearGradient id="phoneBg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0d1117"/>
+      <stop offset="100%" stop-color="#080c14"/>
+    </linearGradient>
+    <!-- Cyan glow for primary accent -->
+    <radialGradient id="cyanGlow" cx="50%" cy="30%" r="60%">
+      <stop offset="0%" stop-color="#00e5ff" stop-opacity="0.07"/>
+      <stop offset="100%" stop-color="#00e5ff" stop-opacity="0"/>
+    </radialGradient>
+    <!-- Hero card gradient -->
+    <linearGradient id="heroGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0e1e35"/>
+      <stop offset="100%" stop-color="#141b2d"/>
+    </linearGradient>
+    <!-- Hero radial glow top-right -->
+    <radialGradient id="heroGlow" cx="85%" cy="15%" r="50%">
+      <stop offset="0%" stop-color="#00e5ff" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#00e5ff" stop-opacity="0"/>
+    </radialGradient>
+    <!-- Subtle card shimmer -->
+    <linearGradient id="cardShimmer" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1a2340"/>
+      <stop offset="100%" stop-color="#111828"/>
+    </linearGradient>
+    <!-- Module icon bg gradients -->
+    <radialGradient id="iconCyan"   cx="50%" cy="50%" r="70%"><stop offset="0%" stop-color="#00e5ff" stop-opacity="0.22"/><stop offset="100%" stop-color="#00e5ff" stop-opacity="0.06"/></radialGradient>
+    <radialGradient id="iconPurple" cx="50%" cy="50%" r="70%"><stop offset="0%" stop-color="#aa00ff" stop-opacity="0.22"/><stop offset="100%" stop-color="#aa00ff" stop-opacity="0.06"/></radialGradient>
+    <radialGradient id="iconAmber"  cx="50%" cy="50%" r="70%"><stop offset="0%" stop-color="#ffab00" stop-opacity="0.22"/><stop offset="100%" stop-color="#ffab00" stop-opacity="0.06"/></radialGradient>
+    <radialGradient id="iconGreen"  cx="50%" cy="50%" r="70%"><stop offset="0%" stop-color="#00e676" stop-opacity="0.22"/><stop offset="100%" stop-color="#00e676" stop-opacity="0.06"/></radialGradient>
+    <radialGradient id="iconBlue"   cx="50%" cy="50%" r="70%"><stop offset="0%" stop-color="#2979ff" stop-opacity="0.22"/><stop offset="100%" stop-color="#2979ff" stop-opacity="0.06"/></radialGradient>
+    <radialGradient id="iconRed"    cx="50%" cy="50%" r="70%"><stop offset="0%" stop-color="#ff1744" stop-opacity="0.22"/><stop offset="100%" stop-color="#ff1744" stop-opacity="0.06"/></radialGradient>
+    <radialGradient id="iconGreen2" cx="50%" cy="50%" r="70%"><stop offset="0%" stop-color="#00c853" stop-opacity="0.22"/><stop offset="100%" stop-color="#00c853" stop-opacity="0.06"/></radialGradient>
+    <radialGradient id="iconOrange" cx="50%" cy="50%" r="70%"><stop offset="0%" stop-color="#ff6d00" stop-opacity="0.22"/><stop offset="100%" stop-color="#ff6d00" stop-opacity="0.06"/></radialGradient>
+    <!-- Bottom nav gradient -->
+    <linearGradient id="navGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0e1420"/>
+      <stop offset="100%" stop-color="#0a1018"/>
+    </linearGradient>
+    <!-- Scanner ring animation path -->
+    <linearGradient id="scanRing" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#00e5ff" stop-opacity="0"/>
+      <stop offset="50%" stop-color="#00e5ff" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#00e5ff" stop-opacity="0"/>
+    </linearGradient>
+    <!-- Clip for phone screen -->
+    <clipPath id="screenClip">
+      <rect x="14" y="14" width="392" height="872" rx="38"/>
+    </clipPath>
+    <filter id="glow"><feGaussianBlur stdDeviation="3" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="softGlow"><feGaussianBlur stdDeviation="6" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+
+  <!-- ── PHONE SHELL ── -->
+  <rect x="4" y="4" width="412" height="892" rx="44" fill="#1a1f2e" stroke="#2a3245" stroke-width="1.5"/>
+  <rect x="8" y="8" width="404" height="884" rx="42" fill="#0d1117" stroke="#1e2840" stroke-width="1"/>
+
+  <!-- ── SCREEN BACKGROUND ── -->
+  <g clip-path="url(#screenClip)">
+    <rect x="14" y="14" width="392" height="872" fill="url(#phoneBg)"/>
+    <!-- Ambient cyan glow -->
+    <rect x="14" y="14" width="392" height="500" fill="url(#cyanGlow)"/>
+
+    <!-- ── STATUS BAR ── -->
+    <rect x="14" y="14" width="392" height="36" fill="#080c14"/>
+    <!-- Time -->
+    <text x="36" y="35" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="13" font-weight="600" fill="#e8eaf6" letter-spacing="0.3">9:41</text>
+    <!-- Right icons: signal/wifi/battery -->
+    <text x="316" y="35" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="11" fill="#8892b0">●●●</text>
+    <text x="346" y="35" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="11" fill="#8892b0">WiFi</text>
+    <rect x="368" y="24" width="22" height="12" rx="3" fill="none" stroke="#8892b0" stroke-width="1.2"/>
+    <rect x="390" y="27" width="2" height="6" rx="1" fill="#8892b0"/>
+    <rect x="370" y="26" width="16" height="8" rx="2" fill="#00e5ff"/>
+    <!-- Notch pill -->
+    <rect x="162" y="18" width="96" height="24" rx="12" fill="#111827"/>
+    <circle cx="200" cy="30" r="4" fill="#1e2840"/>
+    <circle cx="222" cy="30" r="6" fill="#1e2840" stroke="#00e5ff" stroke-width="0.5" stroke-opacity="0.4"/>
+
+    <!-- ── HEADER ROW ── -->
+    <!-- App title -->
+    <text x="28" y="74" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="22" font-weight="700" fill="#e8eaf6" letter-spacing="-0.5">SmartVision</text>
+    <text x="28" y="92" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="11" fill="#8892b0" letter-spacing="0.3">AI-Powered Scanner</text>
+    <!-- Avatar circle -->
+    <circle cx="378" cy="76" r="20" fill="#141b2d" stroke="#1e2a42" stroke-width="1"/>
+    <!-- Person icon -->
+    <circle cx="378" cy="70" r="7" fill="#8892b0" opacity="0.6"/>
+    <path d="M362 96 Q378 82 394 96" fill="#8892b0" opacity="0.4"/>
+
+    <!-- ── HERO CAMERA CTA CARD ── -->
+    <rect x="20" y="106" width="380" height="148" rx="22" fill="url(#heroGrad)"/>
+    <rect x="20" y="106" width="380" height="148" rx="22" fill="url(#heroGlow)"/>
+    <!-- Border with cyan tint -->
+    <rect x="20" y="106" width="380" height="148" rx="22" fill="none" stroke="#00e5ff" stroke-width="0.8" stroke-opacity="0.35"/>
+
+    <!-- Background grid lines (subtle) -->
+    <line x1="20" y1="140" x2="400" y2="140" stroke="#ffffff" stroke-width="0.3" stroke-opacity="0.04"/>
+    <line x1="20" y1="170" x2="400" y2="170" stroke="#ffffff" stroke-width="0.3" stroke-opacity="0.04"/>
+    <line x1="20" y1="200" x2="400" y2="200" stroke="#ffffff" stroke-width="0.3" stroke-opacity="0.04"/>
+    <line x1="100" y1="106" x2="100" y2="254" stroke="#ffffff" stroke-width="0.3" stroke-opacity="0.04"/>
+    <line x1="200" y1="106" x2="200" y2="254" stroke="#ffffff" stroke-width="0.3" stroke-opacity="0.04"/>
+    <line x1="300" y1="106" x2="300" y2="254" stroke="#ffffff" stroke-width="0.3" stroke-opacity="0.04"/>
+
+    <!-- Radar rings -->
+    <circle cx="210" cy="172" r="56" fill="none" stroke="#00e5ff" stroke-width="0.6" stroke-opacity="0.1"/>
+    <circle cx="210" cy="172" r="40" fill="none" stroke="#00e5ff" stroke-width="0.6" stroke-opacity="0.15"/>
+    <circle cx="210" cy="172" r="24" fill="none" stroke="#00e5ff" stroke-width="0.6" stroke-opacity="0.2"/>
+    <!-- Sweep arc -->
+    <path d="M210 172 L210 116 A56 56 0 0 1 258 196 Z" fill="#00e5ff" fill-opacity="0.04"/>
+    <path d="M210 172 L210 116 A56 56 0 0 1 258 196" fill="none" stroke="url(#scanRing)" stroke-width="1.5"/>
+
+    <!-- Camera icon circle -->
+    <circle cx="210" cy="172" r="28" fill="#00e5ff" fill-opacity="0.12" stroke="#00e5ff" stroke-width="1.2" stroke-opacity="0.5"/>
+    <!-- Camera body -->
+    <rect x="196" y="165" width="28" height="20" rx="4" fill="none" stroke="#00e5ff" stroke-width="1.8"/>
+    <circle cx="210" cy="175" r="6" fill="none" stroke="#00e5ff" stroke-width="1.8"/>
+    <circle cx="222" cy="167" r="2.5" fill="#00e5ff"/>
+    <!-- Lens dot -->
+    <circle cx="210" cy="175" r="2.5" fill="#00e5ff" filter="url(#glow)"/>
+
+    <!-- Hero text -->
+    <text x="210" y="222" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="14" font-weight="600" fill="#e8eaf6" text-anchor="middle" letter-spacing="0.1">Point your camera at anything</text>
+    <text x="210" y="238" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="10.5" fill="#8892b0" text-anchor="middle">detect objects · read text · translate &amp; more</text>
+
+    <!-- Mode chips -->
+    <g transform="translate(71, 246)">
+      <!-- Search chip -->
+      <rect x="0" y="0" width="60" height="22" rx="11" fill="#080c14" fill-opacity="0.75" stroke="#1e2a42" stroke-width="0.8"/>
+      <text x="30" y="15" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="9.5" fill="#8892b0" text-anchor="middle">Search</text>
+      <!-- Translate chip -->
+      <rect x="68" y="0" width="68" height="22" rx="11" fill="#080c14" fill-opacity="0.75" stroke="#1e2a42" stroke-width="0.8"/>
+      <text x="102" y="15" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="9.5" fill="#8892b0" text-anchor="middle">Translate</text>
+      <!-- Homework chip -->
+      <rect x="144" y="0" width="72" height="22" rx="11" fill="#080c14" fill-opacity="0.75" stroke="#1e2a42" stroke-width="0.8"/>
+      <text x="180" y="15" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="9.5" fill="#8892b0" text-anchor="middle">Homework</text>
+      <!-- QR chip -->
+      <rect x="224" y="0" width="40" height="22" rx="11" fill="#080c14" fill-opacity="0.75" stroke="#1e2a42" stroke-width="0.8"/>
+      <text x="244" y="15" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="9.5" fill="#8892b0" text-anchor="middle">QR</text>
+    </g>
+
+    <!-- ── MODULES LABEL ── -->
+    <text x="28" y="285" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="10" font-weight="600" fill="#8892b0" letter-spacing="3">M O D U L E S</text>
+
+    <!-- ═══════════════════════════════════════════
+         MODULE CARDS — 2 columns, 4 rows
+    ═══════════════════════════════════════════ -->
+
+    <!-- ── ROW 1: Object Detection | Text Scanner ── -->
+
+    <!-- Card 1: Object Detection -->
+    <rect x="20" y="296" width="182" height="128" rx="18" fill="url(#cardShimmer)" stroke="#1e2a42" stroke-width="0.8"/>
+    <rect x="20" y="296" width="182" height="128" rx="18" fill="none" stroke="#00e5ff" stroke-width="0.6" stroke-opacity="0.3"/>
+    <!-- Glow blob top-right -->
+    <circle cx="187" cy="308" r="36" fill="#00e5ff" fill-opacity="0.06"/>
+    <!-- Icon bubble -->
+    <rect x="36" y="312" width="42" height="42" rx="13" fill="url(#iconCyan)" stroke="#00e5ff" stroke-width="0.7" stroke-opacity="0.4"/>
+    <!-- Eye icon -->
+    <ellipse cx="57" cy="333" rx="10" ry="7" fill="none" stroke="#00e5ff" stroke-width="1.6"/>
+    <circle cx="57" cy="333" r="3.5" fill="#00e5ff"/>
+    <circle cx="59" cy="331" r="1.2" fill="#0a1a2e"/>
+    <!-- Title -->
+    <text x="36" y="374" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="12.5" font-weight="600" fill="#e8eaf6">Object</text>
+    <text x="36" y="389" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="12.5" font-weight="600" fill="#e8eaf6">Detection</text>
+    <text x="36" y="404" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="9.5" fill="#8892b0">AI confidence scores</text>
+    <!-- Accent bar -->
+    <rect x="36" y="416" width="26" height="2.5" rx="1.5" fill="#00e5ff"/>
+
+    <!-- Card 2: Text Scanner OCR -->
+    <rect x="218" y="296" width="182" height="128" rx="18" fill="url(#cardShimmer)" stroke="#1e2a42" stroke-width="0.8"/>
+    <rect x="218" y="296" width="182" height="128" rx="18" fill="none" stroke="#aa00ff" stroke-width="0.6" stroke-opacity="0.3"/>
+    <circle cx="385" cy="308" r="36" fill="#aa00ff" fill-opacity="0.06"/>
+    <!-- Icon bubble -->
+    <rect x="234" y="312" width="42" height="42" rx="13" fill="url(#iconPurple)" stroke="#aa00ff" stroke-width="0.7" stroke-opacity="0.4"/>
+    <!-- Text/T icon -->
+    <text x="255" y="340" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="20" font-weight="700" fill="#aa00ff" text-anchor="middle">T</text>
+    <!-- Title -->
+    <text x="234" y="374" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="12.5" font-weight="600" fill="#e8eaf6">Text Scanner</text>
+    <text x="234" y="389" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="12.5" font-weight="600" fill="#e8eaf6">(OCR)</text>
+    <text x="234" y="404" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="9.5" fill="#8892b0">Copy · Translate · Speak</text>
+    <rect x="234" y="416" width="26" height="2.5" rx="1.5" fill="#aa00ff"/>
+
+    <!-- ── ROW 2: Translator | Voice Translator ── -->
+
+    <!-- Card 3: Translator -->
+    <rect x="20" y="436" width="182" height="128" rx="18" fill="url(#cardShimmer)" stroke="#1e2a42" stroke-width="0.8"/>
+    <rect x="20" y="436" width="182" height="128" rx="18" fill="none" stroke="#ffab00" stroke-width="0.6" stroke-opacity="0.3"/>
+    <circle cx="187" cy="448" r="36" fill="#ffab00" fill-opacity="0.06"/>
+    <rect x="36" y="452" width="42" height="42" rx="13" fill="url(#iconAmber)" stroke="#ffab00" stroke-width="0.7" stroke-opacity="0.4"/>
+    <!-- 文A icon -->
+    <text x="43" y="476" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="14" font-weight="700" fill="#ffab00">文</text>
+    <text x="61" y="481" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="11" font-weight="700" fill="#ffab00">A</text>
+    <text x="36" y="514" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="12.5" font-weight="600" fill="#e8eaf6">Translator</text>
+    <text x="36" y="529" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="9.5" fill="#8892b0">Translate in real-time</text>
+    <rect x="36" y="555" width="26" height="2.5" rx="1.5" fill="#ffab00"/>
+
+    <!-- Card 4: Voice Translator -->
+    <rect x="218" y="436" width="182" height="128" rx="18" fill="url(#cardShimmer)" stroke="#1e2a42" stroke-width="0.8"/>
+    <rect x="218" y="436" width="182" height="128" rx="18" fill="none" stroke="#00e676" stroke-width="0.6" stroke-opacity="0.3"/>
+    <circle cx="385" cy="448" r="36" fill="#00e676" fill-opacity="0.06"/>
+    <rect x="234" y="452" width="42" height="42" rx="13" fill="url(#iconGreen)" stroke="#00e676" stroke-width="0.7" stroke-opacity="0.4"/>
+    <!-- Mic icon -->
+    <rect x="250" y="459" width="10" height="16" rx="5" fill="none" stroke="#00e676" stroke-width="1.8"/>
+    <path d="M244 470 Q244 480 255 480 Q266 480 266 470" fill="none" stroke="#00e676" stroke-width="1.8"/>
+    <line x1="255" y1="480" x2="255" y2="485" stroke="#00e676" stroke-width="1.8"/>
+    <line x1="250" y1="485" x2="260" y2="485" stroke="#00e676" stroke-width="1.8"/>
+    <text x="234" y="514" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="12.5" font-weight="600" fill="#e8eaf6">Voice</text>
+    <text x="234" y="529" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="12.5" font-weight="600" fill="#e8eaf6">Translator</text>
+    <text x="234" y="544" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="9.5" fill="#8892b0">Speak &amp; translate instantly</text>
+    <rect x="234" y="555" width="26" height="2.5" rx="1.5" fill="#00e676"/>
+
+    <!-- ── ROW 3: Student Helper | Medical Scanner ── -->
+
+    <!-- Card 5: Student Helper -->
+    <rect x="20" y="576" width="182" height="128" rx="18" fill="url(#cardShimmer)" stroke="#1e2a42" stroke-width="0.8"/>
+    <rect x="20" y="576" width="182" height="128" rx="18" fill="none" stroke="#2979ff" stroke-width="0.6" stroke-opacity="0.3"/>
+    <circle cx="187" cy="588" r="36" fill="#2979ff" fill-opacity="0.06"/>
+    <rect x="36" y="592" width="42" height="42" rx="13" fill="url(#iconBlue)" stroke="#2979ff" stroke-width="0.7" stroke-opacity="0.4"/>
+    <!-- Cap icon -->
+    <path d="M46 614 L57 608 L68 614 L57 620 Z" fill="none" stroke="#2979ff" stroke-width="1.8" stroke-linejoin="round"/>
+    <path d="M62 616 L62 624 Q57 627 52 624 L52 616" fill="none" stroke="#2979ff" stroke-width="1.6"/>
+    <line x1="68" y1="614" x2="68" y2="622" stroke="#2979ff" stroke-width="1.8"/>
+    <text x="36" y="654" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="12.5" font-weight="600" fill="#e8eaf6">Student</text>
+    <text x="36" y="669" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="12.5" font-weight="600" fill="#e8eaf6">Helper</text>
+    <text x="36" y="684" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="9.5" fill="#8892b0">Solve with Gemini AI</text>
+    <rect x="36" y="695" width="26" height="2.5" rx="1.5" fill="#2979ff"/>
+
+    <!-- Card 6: Medical Scanner -->
+    <rect x="218" y="576" width="182" height="128" rx="18" fill="url(#cardShimmer)" stroke="#1e2a42" stroke-width="0.8"/>
+    <rect x="218" y="576" width="182" height="128" rx="18" fill="none" stroke="#ff1744" stroke-width="0.6" stroke-opacity="0.3"/>
+    <circle cx="385" cy="588" r="36" fill="#ff1744" fill-opacity="0.06"/>
+    <rect x="234" y="592" width="42" height="42" rx="13" fill="url(#iconRed)" stroke="#ff1744" stroke-width="0.7" stroke-opacity="0.4"/>
+    <!-- Cross/pill icon -->
+    <rect x="252" y="607" width="4" height="14" rx="2" fill="#ff1744"/>
+    <rect x="247" y="612" width="14" height="4" rx="2" fill="#ff1744"/>
+    <text x="234" y="654" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="12.5" font-weight="600" fill="#e8eaf6">Medical</text>
+    <text x="234" y="669" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="12.5" font-weight="600" fill="#e8eaf6">Scanner</text>
+    <text x="234" y="684" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="9.5" fill="#8892b0">Dosage &amp; side effects</text>
+    <rect x="234" y="695" width="26" height="2.5" rx="1.5" fill="#ff1744"/>
+
+    <!-- ── ROW 4: Waste Classifier | QR Scanner ── -->
+
+    <!-- Card 7: Waste Classifier -->
+    <rect x="20" y="716" width="182" height="128" rx="18" fill="url(#cardShimmer)" stroke="#1e2a42" stroke-width="0.8"/>
+    <rect x="20" y="716" width="182" height="128" rx="18" fill="none" stroke="#00c853" stroke-width="0.6" stroke-opacity="0.3"/>
+    <circle cx="187" cy="728" r="36" fill="#00c853" fill-opacity="0.06"/>
+    <rect x="36" y="732" width="42" height="42" rx="13" fill="url(#iconGreen2)" stroke="#00c853" stroke-width="0.7" stroke-opacity="0.4"/>
+    <!-- Recycle icon (simplified arrows) -->
+    <path d="M57 740 L63 748 L57 756" fill="none" stroke="#00c853" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M57 756 L51 748 L57 740" fill="none" stroke="#00c853" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="8 2"/>
+    <text x="36" y="794" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="12.5" font-weight="600" fill="#e8eaf6">Waste</text>
+    <text x="36" y="809" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="12.5" font-weight="600" fill="#e8eaf6">Classifier</text>
+    <text x="36" y="824" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="9.5" fill="#8892b0">Recyclable · Organic</text>
+    <rect x="36" y="835" width="26" height="2.5" rx="1.5" fill="#00c853"/>
+
+    <!-- Card 8: QR Scanner -->
+    <rect x="218" y="716" width="182" height="128" rx="18" fill="url(#cardShimmer)" stroke="#1e2a42" stroke-width="0.8"/>
+    <rect x="218" y="716" width="182" height="128" rx="18" fill="none" stroke="#ff6d00" stroke-width="0.6" stroke-opacity="0.3"/>
+    <circle cx="385" cy="728" r="36" fill="#ff6d00" fill-opacity="0.06"/>
+    <rect x="234" y="732" width="42" height="42" rx="13" fill="url(#iconOrange)" stroke="#ff6d00" stroke-width="0.7" stroke-opacity="0.4"/>
+    <!-- QR icon -->
+    <rect x="241" y="739" width="8" height="8" rx="1.5" fill="none" stroke="#ff6d00" stroke-width="1.5"/>
+    <rect x="243" y="741" width="4" height="4" rx="0.5" fill="#ff6d00"/>
+    <rect x="261" y="739" width="8" height="8" rx="1.5" fill="none" stroke="#ff6d00" stroke-width="1.5"/>
+    <rect x="263" y="741" width="4" height="4" rx="0.5" fill="#ff6d00"/>
+    <rect x="241" y="759" width="8" height="8" rx="1.5" fill="none" stroke="#ff6d00" stroke-width="1.5"/>
+    <rect x="243" y="761" width="4" height="4" rx="0.5" fill="#ff6d00"/>
+    <line x1="261" y1="759" x2="269" y2="759" stroke="#ff6d00" stroke-width="1.5"/>
+    <line x1="261" y1="759" x2="261" y2="767" stroke="#ff6d00" stroke-width="1.5"/>
+    <line x1="265" y1="763" x2="265" y2="767" stroke="#ff6d00" stroke-width="1.5"/>
+    <line x1="265" y1="767" x2="269" y2="767" stroke="#ff6d00" stroke-width="1.5"/>
+    <text x="234" y="794" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="12.5" font-weight="600" fill="#e8eaf6">QR Scanner</text>
+    <text x="234" y="809" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="12.5" font-weight="600" fill="#e8eaf6"></text>
+    <text x="234" y="819" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="9.5" fill="#8892b0">Auto-open links</text>
+    <rect x="234" y="835" width="26" height="2.5" rx="1.5" fill="#ff6d00"/>
+
+    <!-- ── BOTTOM NAVIGATION BAR ── -->
+    <rect x="14" y="850" width="392" height="52" fill="url(#navGrad)" stroke="#1e2a42" stroke-width="0" />
+    <line x1="14" y1="850" x2="406" y2="850" stroke="#1e2a42" stroke-width="0.8"/>
+
+    <!-- Nav: Home (active) -->
+    <g transform="translate(47, 854)">
+      <rect x="-18" y="-2" width="36" height="32" rx="10" fill="#00e5ff" fill-opacity="0.1"/>
+      <!-- Home icon -->
+      <path d="M0 6 L-8 14 L-8 26 L-4 26 L-4 20 L4 20 L4 26 L8 26 L8 14 Z" fill="#00e5ff"/>
+      <text x="0" y="40" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="9" fill="#00e5ff" text-anchor="middle" font-weight="600">Home</text>
+    </g>
+
+    <!-- Nav: Scan -->
+    <g transform="translate(140, 854)">
+      <!-- Camera icon outline -->
+      <rect x="-9" y="4" width="18" height="13" rx="3" fill="none" stroke="#8892b0" stroke-width="1.5"/>
+      <circle cx="0" cy="10.5" r="4" fill="none" stroke="#8892b0" stroke-width="1.5"/>
+      <rect x="3" y="2" width="4" height="3" rx="1" fill="#8892b0"/>
+      <text x="0" y="40" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="9" fill="#8892b0" text-anchor="middle">Scan</text>
+    </g>
+
+    <!-- Nav: History -->
+    <g transform="translate(270, 854)">
+      <circle cx="0" cy="10" r="8" fill="none" stroke="#8892b0" stroke-width="1.5"/>
+      <path d="M0 10 L0 5 M0 10 L4 13" stroke="#8892b0" stroke-width="1.5" stroke-linecap="round"/>
+      <text x="0" y="40" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="9" fill="#8892b0" text-anchor="middle">History</text>
+    </g>
+
+    <!-- Nav: Settings -->
+    <g transform="translate(370, 854)">
+      <circle cx="0" cy="10" r="4" fill="none" stroke="#8892b0" stroke-width="1.5"/>
+      <circle cx="0" cy="10" r="8" fill="none" stroke="#8892b0" stroke-width="1.5" stroke-dasharray="3 2.5"/>
+      <text x="0" y="40" font-family="'SF Pro Display', -apple-system, sans-serif" font-size="9" fill="#8892b0" text-anchor="middle">Settings</text>
+    </g>
+
+    <!-- Home indicator bar -->
+    <rect x="157" y="879" width="106" height="4" rx="2" fill="#e8eaf6" fill-opacity="0.25"/>
+
+  </g>
+
+  <!-- ── OUTER PHONE GLOW ── -->
+  <rect x="4" y="4" width="412" height="892" rx="44" fill="none" stroke="#00e5ff" stroke-width="0.5" stroke-opacity="0.08"/>
+
+  <!-- Side buttons -->
+  <rect x="0" y="180" width="4" height="60" rx="2" fill="#1e2840"/>
+  <rect x="0" y="260" width="4" height="40" rx="2" fill="#1e2840"/>
+  <rect x="416" y="220" width="4" height="80" rx="2" fill="#1e2840"/>
+</svg>

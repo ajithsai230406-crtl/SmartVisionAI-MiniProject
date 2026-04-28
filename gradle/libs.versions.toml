@@ -27,6 +27,7 @@ coroutines              = "1.7.3"
 junit                   = "4.13.2"
 junitExt                = "1.1.5"
 espresso                = "3.5.1"
+firebaseBom             = "33.7.0"
 
 [libraries]
 # Core
@@ -73,6 +74,12 @@ tensorflow-lite-task-vision     = { group = "org.tensorflow",              name 
 
 # Gemini
 gemini-generativeai             = { group = "com.google.ai.client.generativeai", name = "generativeai",          version.ref = "gemini" }
+
+# Firebase
+firebase-bom                    = { group = "com.google.firebase",         name = "firebase-bom",                 version.ref = "firebaseBom" }
+firebase-firestore              = { group = "com.google.firebase",         name = "firebase-firestore" }
+firebase-auth                   = { group = "com.google.firebase",         name = "firebase-auth" }
+firebase-storage                = { group = "com.google.firebase",         name = "firebase-storage" }
 
 # Hilt
 hilt-android                    = { group = "com.google.dagger",           name = "hilt-android",                 version.ref = "hilt" }

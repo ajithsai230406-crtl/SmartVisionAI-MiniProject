@@ -1,0 +1,18 @@
+=======================================================================
+ACTION REQUIRED — DELETE THIS FILE FROM YOUR PROJECT:
+
+  app/src/main/java/com/smartvision/ai/data/repository/UseCaseImplementations.kt
+
+This old file declares all UseCase impl classes together in one file.
+It causes "Redeclaration" errors because each class now has its own
+separate file in this same folder:
+
+  DetectObjectsUseCaseImpl.kt
+  OcrUseCaseImpl.kt
+  ScanQrUseCaseImpl.kt
+  StudentHelperUseCaseImpl.kt
+  ClassifyWasteUseCaseImpl.kt
+  MedicalScanUseCaseImpl.kt
+
+In Android Studio: right-click UseCaseImplementations.kt → Delete
+=======================================================================

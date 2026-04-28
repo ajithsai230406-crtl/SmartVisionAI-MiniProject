@@ -19,15 +19,6 @@ import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.*
 import com.example.smartvisionai.ui.screens.*
 import com.example.smartvisionai.ui.theme.*
-import android.app.Application
-import dagger.hilt.android.HiltAndroidApp
-
-@HiltAndroidApp
-class SmartVisionApp : Application() {
-    override fun onCreate() {
-        super.onCreate()
-    }
-}
 
 sealed class Screen(val route: String) {
     object Home : Screen("home")

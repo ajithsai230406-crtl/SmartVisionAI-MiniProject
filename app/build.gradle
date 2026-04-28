@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.hilt)
     alias(libs.plugins.kotlin.kapt)
+    alias(libs.plugins.google.services)
 }
 
 android {
@@ -92,6 +93,12 @@ dependencies {
 
     // --- Gemini AI ---
     implementation libs.gemini.generativeai
+
+    // --- Firebase ---
+    implementation platform(libs.firebase.bom)
+    implementation libs.firebase.firestore
+    implementation libs.firebase.auth
+    implementation libs.firebase.storage
 
     // --- Hilt DI ---
     implementation libs.hilt.android
