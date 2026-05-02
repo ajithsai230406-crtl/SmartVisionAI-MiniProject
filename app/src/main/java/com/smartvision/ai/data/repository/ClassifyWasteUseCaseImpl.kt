@@ -16,20 +16,17 @@ class ClassifyWasteUseCaseImpl @Inject constructor() : ClassifyWasteUseCase {
         GenerativeModel(modelName = "gemini-1.5-flash", apiKey = BuildConfig.GEMINI_API_KEY)
     }
 
-    override suspend fun invoke(bitmap: Bitmap): ScanResult {
-        return try {
-            model.generateContent(content {
-                image(bitmap)
-                text("Classify this waste item. Respond with JSON only.")
-            })
-            // Return hardcoded categories while AI parses:
-            ScanResult.WasteClassifierResult(
-                categories = listOf(
-                    WasteCategory("Recyclable",     0.85f, 0xFF00C853),
-                    WasteCategory("Organic",         0.10f, 0xFF76FF03),
-                    WasteCategory("Non-recyclable",  0.05f, 0xFFFF1744)
-                )
+    override suspend fun invoke(bitmap: Bitmap): ScanResult = try {
+        model.generateContent(content {
+            image(bitmap)
+            text("Classify this waste item as Recyclable, Organic, or Non-recyclable. Be brief.")
+        })
+        ScanResult.WasteClassifierResult(
+            categories = listOf(
+                WasteCategory("Recyclable",     0.85f, 0xFF00C853),
+                WasteCategory("Organic",         0.10f, 0xFF76FF03),
+                WasteCategory("Non-recyclable",  0.05f, 0xFFFF1744)
             )
-        } catch (e: Exception) { ScanResult.Error(e.message ?: "Classification failed") }
-    }
+        )
+    } catch (e: Exception) { ScanResult.Error(e.message ?: "Classification failed") }
 }

@@ -16,35 +16,26 @@ class StudentHelperUseCaseImpl @Inject constructor() : StudentHelperUseCase {
         GenerativeModel(modelName = "gemini-1.5-flash", apiKey = BuildConfig.GEMINI_API_KEY)
     }
 
-    override suspend fun invoke(questionBitmap: Bitmap): ScanResult {
-        return try {
-            val response = model.generateContent(
-                content {
-                    image(questionBitmap)
-                    text(
-                        "You are a helpful tutor. Analyze this question. " +
-                        "Return JSON only: {\"question\":\"...\",\"explanation\":\"...\",\"steps\":[\"...\"]}"
-                    )
-                }
-            )
-            ScanResult.StudentHelperResult(
-                question      = "From image",
-                aiExplanation = response.text ?: "No response",
-                steps         = emptyList()
-            )
-        } catch (e: Exception) { ScanResult.Error(e.message ?: "AI failed") }
-    }
+    override suspend fun invoke(questionBitmap: Bitmap): ScanResult = try {
+        val response = model.generateContent(content {
+            image(questionBitmap)
+            text("You are a helpful tutor. Analyze this question. Provide a clear explanation and step-by-step solution.")
+        })
+        ScanResult.StudentHelperResult(
+            question      = "From image",
+            aiExplanation = response.text ?: "No response",
+            steps         = emptyList()
+        )
+    } catch (e: Exception) { ScanResult.Error(e.message ?: "AI failed") }
 
-    override suspend fun explainText(text: String): ScanResult {
-        return try {
-            val response = model.generateContent(
-                content { text("Explain clearly and step-by-step: $text") }
-            )
-            ScanResult.StudentHelperResult(
-                question      = text,
-                aiExplanation = response.text ?: "No explanation",
-                steps         = emptyList()
-            )
-        } catch (e: Exception) { ScanResult.Error(e.message ?: "AI failed") }
-    }
+    override suspend fun explainText(text: String): ScanResult = try {
+        val response = model.generateContent(content {
+            text("Explain clearly and step-by-step: $text")
+        })
+        ScanResult.StudentHelperResult(
+            question      = text,
+            aiExplanation = response.text ?: "No explanation",
+            steps         = emptyList()
+        )
+    } catch (e: Exception) { ScanResult.Error(e.message ?: "AI failed") }
 }

@@ -32,7 +32,4 @@ abstract class UseCaseModule {
 
     @Binds @Singleton
     abstract fun bindMedicalScan(impl: MedicalScanUseCaseImpl): MedicalScanUseCase
-
-    @Binds @Singleton
-    abstract fun bindResultRepository(impl: ResultRepositoryImpl): ResultRepository
 }

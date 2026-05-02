@@ -35,13 +35,13 @@ fun GalleryPickerButton(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri -> uri?.let { onImagePicked(it) } }
 
-    val colors = smartColors
+    val colors = svColors
     OutlinedButton(
         onClick  = {
             launcher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
         },
         modifier = modifier,
-        border   = BorderStroke(1.dp, colors.cardBorder),
+        border   = BorderStroke(1.dp, colors.border),
         shape    = RoundedCornerShape(14.dp)
     ) {
         Icon(Icons.Rounded.PhotoLibrary, null, modifier = Modifier.size(18.dp))

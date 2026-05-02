@@ -2,7 +2,7 @@ package com.example.smartvisionai.ml
 
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.content
-import com.example.smartvisionai.BuildConfig
+import com.smartvision.ai.BuildConfig
 import javax.inject.Inject
 import javax.inject.Singleton
 

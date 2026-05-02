@@ -1,42 +1,51 @@
+import java.util.Properties
+
 plugins {
-    alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
-    alias(libs.plugins.hilt)
-    alias(libs.plugins.kotlin.kapt)
     id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
+    id("com.google.dagger.hilt.android")
+    id("com.google.devtools.ksp")
     id("com.google.gms.google-services")
 }
-buildFeatures {
-    buildConfig = true
+
+val localProps = Properties().apply {
+    rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
 }
+
+// ── Resolve TFLite / LiteRT duplicate class conflict ────────────────────────
+configurations.all {
+    exclude(group = "org.tensorflow",         module = "tensorflow-lite-api")
+    exclude(group = "com.google.android.gms", module = "play-services-tflite-support")
+    resolutionStrategy {
+        force("com.google.android.gms:play-services-tflite-java:16.4.0")
+    }
+}
+
 android {
-    namespace = "com.smartvision.ai"
-    compileSdk  = 34
+    namespace  = "com.smartvision.ai"
+    compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.smartvision.ai"
-        minSdk          = 24
-        targetSdk       = 34
-        versionCode     = 1
-        versionName     = "1.0.0"
+        applicationId    = "com.smartvision.ai"
+        minSdk           = 26
+        targetSdk        = 35
+        versionCode      = 1
+        versionName      = "1.0.0"
+        multiDexEnabled  = true
 
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        vectorDrawables { useSupportLibrary = true }
-
-        // ⚠ Replace with your real Gemini API key from https://aistudio.google.com
-        buildConfigField("String", "GEMINI_API_KEY", "\"YOUR_GEMINI_API_KEY_HERE\"")
+        buildConfigField("String", "GEMINI_API_KEY",
+            "\"${localProps.getProperty("GEMINI_API_KEY", "")}\"")
     }
 
     buildTypes {
         release {
             isMinifyEnabled = true
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro")
         }
         debug {
-            isMinifyEnabled = false
+            isDebuggable = true
         }
     }
 
@@ -45,102 +54,110 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
+    kotlinOptions { jvmTarget = "17" }
 
     buildFeatures {
         compose     = true
         buildConfig = true
     }
 
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.15"
-    }
-
+    // ── Fix duplicate .so native libs ────────────────────────────────────
     packaging {
+        jniLibs {
+            pickFirsts += setOf(
+                "lib/arm64-v8a/libtensorflowlite_jni.so",
+                "lib/arm64-v8a/libtensorflowlite_gpu_jni.so",
+                "lib/x86_64/libtensorflowlite_jni.so",
+                "lib/x86_64/libtensorflowlite_gpu_jni.so",
+                "lib/armeabi-v7a/libtensorflowlite_jni.so",
+                "lib/armeabi-v7a/libtensorflowlite_gpu_jni.so",
+                "lib/x86/libtensorflowlite_jni.so",
+                "lib/x86/libtensorflowlite_gpu_jni.so"
+            )
+        }
         resources {
-            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += setOf(
+                "META-INF/LICENSE.md",
+                "META-INF/LICENSE-notice.md",
+                "META-INF/DEPENDENCIES",
+                "META-INF/NOTICE.md"
+            )
         }
     }
 }
 
 dependencies {
-    // — Firebase —
-    implementation(platform("com.google.firebase:firebase-bom:33.0.0"))
-    implementation("com.google.firebase:firebase-database-ktx")
-    implementation("com.google.firebase:firebase-analytics-ktx")
-    // ── Core ─────────────────────────────────────────────────────────────────
-    implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.lifecycle.runtime)
-    implementation(libs.androidx.lifecycle.viewmodel)
-    implementation(libs.androidx.activity.compose)
+    // ── Compose BOM ──────────────────────────────────────────────────────
+    val bom = platform("androidx.compose:compose-bom:2024.12.01")
+    implementation(bom)
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.compose.animation:animation")
+    implementation("androidx.compose.foundation:foundation")
+    debugImplementation("androidx.compose.ui:ui-tooling")
 
-    // ── Compose BOM ───────────────────────────────────────────────────────────
-    implementation(platform(libs.androidx.compose.bom))
-    implementation(libs.androidx.compose.ui)
-    implementation(libs.androidx.compose.ui.graphics)
-    implementation(libs.androidx.compose.ui.tooling.preview)
-    implementation(libs.androidx.compose.material3)
-    implementation(libs.androidx.compose.material.icons)
-    implementation(libs.androidx.compose.animation)
-    implementation(libs.androidx.compose.foundation)
+    // ── AndroidX Core ────────────────────────────────────────────────────
+    implementation("androidx.core:core-ktx:1.13.1")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
+    implementation("androidx.activity:activity-compose:1.9.3")
+    implementation("androidx.core:core-splashscreen:1.0.1")
+    implementation("androidx.multidex:multidex:2.0.1")
 
-    // ── Navigation ────────────────────────────────────────────────────────────
-    implementation(libs.androidx.navigation.compose)
+    // ── Navigation ───────────────────────────────────────────────────────
+    implementation("androidx.navigation:navigation-compose:2.8.4")
 
-    // ── CameraX ───────────────────────────────────────────────────────────────
-    implementation(libs.androidx.camera.core)
-    implementation(libs.androidx.camera.camera2)
-    implementation(libs.androidx.camera.lifecycle)
-    implementation(libs.androidx.camera.view)
-    implementation(libs.androidx.camera.extensions)
+    // ── CameraX ──────────────────────────────────────────────────────────
+    implementation("androidx.camera:camera-core:1.4.0")
+    implementation("androidx.camera:camera-camera2:1.4.0")
+    implementation("androidx.camera:camera-lifecycle:1.4.0")
+    implementation("androidx.camera:camera-view:1.4.0")
+    implementation("androidx.concurrent:concurrent-futures-ktx:1.2.0")
 
-    // ── ML Kit ────────────────────────────────────────────────────────────────
-    implementation(libs.mlkit.text.recognition)
-    implementation(libs.mlkit.object.detection)
-    implementation(libs.mlkit.image.labeling)
-    implementation(libs.mlkit.language.id)
-    implementation(libs.mlkit.translate)
+    // ── ML Kit (bundles its own TFLite — no extra TFLite needed) ─────────
+    implementation("com.google.mlkit:text-recognition:16.0.1")
+    implementation("com.google.mlkit:object-detection:17.0.2")
+    implementation("com.google.mlkit:barcode-scanning:17.3.0")
+    implementation("com.google.mlkit:translate:17.0.3")
+    implementation("com.google.mlkit:language-id:17.0.6")
 
-    // ── TensorFlow Lite ───────────────────────────────────────────────────────
-    implementation(libs.tensorflow.lite)
-    implementation(libs.tensorflow.lite.support)
-    implementation(libs.tensorflow.lite.metadata)
-    implementation(libs.tensorflow.lite.task.vision)
+    // ── Gemini — strip conflicting TFLite transitive deps ────────────────
+    implementation("com.google.ai.client.generativeai:generativeai:0.9.0") {
+        exclude(group = "org.tensorflow")
+        exclude(group = "com.google.android.gms", module = "play-services-tflite-java")
+        exclude(group = "com.google.android.gms", module = "play-services-tflite-gpu")
+        exclude(group = "com.google.android.gms", module = "play-services-tflite-support")
+    }
 
-    // ── Gemini AI ─────────────────────────────────────────────────────────────
-    implementation(libs.gemini.generativeai)
+    // ── Firebase ─────────────────────────────────────────────────────────
+    implementation(platform("com.google.firebase:firebase-bom:33.6.0"))
+    implementation("com.google.firebase:firebase-auth-ktx")
+    implementation("com.google.firebase:firebase-firestore-ktx")
+    implementation("com.google.firebase:firebase-storage-ktx")
+    implementation("com.google.android.gms:play-services-auth:21.2.0")
 
-    // ── Hilt DI ───────────────────────────────────────────────────────────────
-    implementation(libs.hilt.android)
-    kapt(libs.hilt.compiler)
-    implementation(libs.hilt.navigation.compose)
+    // ── Hilt (KSP) ───────────────────────────────────────────────────────
+    implementation("com.google.dagger:hilt-android:2.55")
+    ksp("com.google.dagger:hilt-compiler:2.55")
+    implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
 
-    // ── Room ──────────────────────────────────────────────────────────────────
-    implementation(libs.androidx.room.runtime)
-    implementation(libs.androidx.room.ktx)
-    kapt(libs.androidx.room.compiler)
+    // ── Image Loading ─────────────────────────────────────────────────────
+    implementation("io.coil-kt:coil-compose:2.7.0")
 
-    // ── DataStore ─────────────────────────────────────────────────────────────
-    implementation(libs.androidx.datastore.preferences)
+    // ── Accompanist ──────────────────────────────────────────────────────
+    implementation("com.google.accompanist:accompanist-permissions:0.36.0")
+    implementation("com.google.accompanist:accompanist-systemuicontroller:0.36.0")
 
-    // ── Image / Utils ─────────────────────────────────────────────────────────
-    implementation(libs.coil.compose)
-    implementation(libs.accompanist.permissions)
-    implementation(libs.kotlinx.coroutines.android)
-    implementation(libs.androidx.exifinterface)
+    // ── DataStore ────────────────────────────────────────────────────────
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
 
-    // ── Debug ─────────────────────────────────────────────────────────────────
-    debugImplementation(libs.androidx.compose.ui.tooling)
-    debugImplementation(libs.androidx.compose.ui.test)
+    // ── Coroutines ───────────────────────────────────────────────────────
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
 
-    // ── Test ──────────────────────────────────────────────────────────────────
-    testImplementation(libs.junit)
-    androidTestImplementation(libs.androidx.junit)
-    androidTestImplementation(libs.androidx.espresso)
-}
-
-kapt {
-    correctErrorTypes = true
+    // ── Testing ──────────────────────────────────────────────────────────
+    testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
 }

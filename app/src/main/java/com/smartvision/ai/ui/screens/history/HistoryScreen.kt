@@ -1,6 +1,5 @@
 package com.smartvision.ai.ui.screens.history
 
-import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
@@ -10,7 +9,7 @@ import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
-import androidx.compose.ui.draw.*
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -25,69 +24,62 @@ import java.util.*
 
 @Composable
 fun HistoryScreen(
-    onBack:      () -> Unit,
+    onBack: () -> Unit,
     onItemClick: (String) -> Unit,
-    viewModel:   HistoryViewModel = hiltViewModel()
+    vm: HistoryViewModel = hiltViewModel()
 ) {
-    val colors  = smartColors
-    val uiState by viewModel.uiState.collectAsState()
-
-    LaunchedEffect(Unit) { viewModel.loadHistory() }
+    val c = svColors
+    val s by vm.uiState.collectAsState(initial = HistoryUiState())
+    
+    LaunchedEffect(Unit) { 
+        vm.loadHistory() 
+    }
 
     Scaffold(
-        topBar         = {
-            SmartVisionTopBar(title = "History", onBack = onBack) {
-                if (uiState.selectedIds.isNotEmpty()) {
-                    IconButton(onClick = viewModel::deleteSelected) {
-                        Icon(Icons.Rounded.Delete, null, tint = colors.error)
+        topBar = { 
+            SmartVisionTopBar("History", onBack = onBack) {
+                if (s.selectedIds.isNotEmpty()) {
+                    IconButton(onClick = { vm.deleteSelected() }) {
+                        Icon(Icons.Rounded.Delete, null, tint = c.error)
                     }
                 }
             }
         },
-        containerColor = colors.background
-    ) { padding ->
+        containerColor = c.background
+    ) { pad ->
         when {
-            uiState.isLoading -> {
-                Box(Modifier.fillMaxSize(), Alignment.Center) {
-                    CircularProgressIndicator(color = colors.primary)
-                }
+            s.isLoading -> Box(Modifier.fillMaxSize().padding(pad), Alignment.Center) { 
+                CircularProgressIndicator(color = c.primary) 
             }
-            uiState.items.isEmpty() -> {
-                EmptyHistoryState()
-            }
+            s.items.isEmpty() -> EmptyHistory(pad)
             else -> {
+                val grouped = s.items.groupBy { item ->
+                    SimpleDateFormat("MMM dd, yyyy", Locale.getDefault()).format(Date(item.timestampMillis))
+                }
                 LazyColumn(
-                    modifier            = Modifier.fillMaxSize().padding(padding),
-                    contentPadding      = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    Modifier.fillMaxSize().padding(pad), 
+                    contentPadding = PaddingValues(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    // Group by date
-                    val grouped = uiState.items.groupBy { item ->
-                        SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
-                            .format(Date(item.timestampMillis))
-                    }
-                    grouped.forEach { (dateLabel, items) ->
+                    grouped.forEach { (date, items) ->
                         item {
                             Text(
-                                text     = dateLabel,
-                                style    = MaterialTheme.typography.labelLarge,
-                                color    = colors.subtext,
-                                fontWeight = FontWeight.SemiBold,
+                                date, 
+                                style = MaterialTheme.typography.labelLarge, 
+                                color = c.subtext,
+                                fontWeight = FontWeight.SemiBold, 
                                 letterSpacing = 1.sp,
                                 modifier = Modifier.padding(bottom = 4.dp)
                             )
                         }
-                        items(items, key = { it.id }) { historyItem ->
-                            HistoryCard(
-                                item       = historyItem,
-                                isSelected = historyItem.id in uiState.selectedIds,
-                                onLongPress = { viewModel.toggleSelection(historyItem.id) },
-                                onClick    = {
-                                    if (uiState.selectedIds.isNotEmpty()) {
-                                        viewModel.toggleSelection(historyItem.id)
-                                    } else {
-                                        onItemClick(historyItem.id)
-                                    }
+                        items(items, key = { it.id }) { item ->
+                            HistoryItem(
+                                item = item, 
+                                selected = item.id in s.selectedIds,
+                                onLong = { vm.toggleSelection(item.id) },
+                                onClick = { 
+                                    if (s.selectedIds.isNotEmpty()) vm.toggleSelection(item.id) 
+                                    else onItemClick(item.id) 
                                 }
                             )
                         }
@@ -98,125 +90,86 @@ fun HistoryScreen(
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// HISTORY CARD
-// ─────────────────────────────────────────────────────────────────────────────
-
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun HistoryCard(
-    item:       ScanHistoryItem,
-    isSelected: Boolean,
-    onLongPress: () -> Unit,
-    onClick:    () -> Unit
+private fun HistoryItem(
+    item: ScanHistoryItem, 
+    selected: Boolean, 
+    onLong: () -> Unit, 
+    onClick: () -> Unit
 ) {
-    val colors     = smartColors
-    val moduleType = ModuleType.entries.find { it.name == item.moduleType }
-    val accent     = moduleType?.let { moduleAccentColor(it) } ?: colors.primary
-    val time       = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(item.timestampMillis))
+    val c = svColors
+    val module = ModuleType.entries.find { it.name == item.moduleType }
+    val accent = module?.let { moduleAccent(it) } ?: c.primary
+    val time = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(item.timestampMillis))
 
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(if (isSelected) accent.copy(0.12f) else colors.card)
-            .border(
-                1.dp,
-                if (isSelected) accent.copy(0.5f) else colors.cardBorder,
-                RoundedCornerShape(18.dp)
-            )
-            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
-            .padding(12.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment     = Alignment.CenterVertically
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+            .background(if (selected) accent.copy(.1f) else c.card)
+            .border(1.dp, if (selected) accent.copy(.5f) else c.border, RoundedCornerShape(16.dp))
+            .combinedClickable(onClick = onClick, onLongClick = onLong).padding(11.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp), 
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        // Thumbnail
-        Box(
-            modifier = Modifier
-                .size(64.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(colors.surface)
-        ) {
+        Box(Modifier.size(52.dp).clip(RoundedCornerShape(11.dp)).background(c.surface)) {
             if (item.imageUrl.isNotEmpty()) {
-                AsyncImage(
-                    model              = item.imageUrl,
-                    contentDescription = null,
-                    contentScale       = ContentScale.Crop,
-                    modifier           = Modifier.fillMaxSize()
-                )
+                AsyncImage(item.imageUrl, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
             } else {
-                Icon(
-                    imageVector = moduleType?.let { moduleIcon(it) } ?: Icons.Rounded.History,
-                    contentDescription = null,
-                    tint     = accent,
-                    modifier = Modifier.align(Alignment.Center).size(30.dp)
-                )
+                Box(Modifier.fillMaxSize(), Alignment.Center) {
+                    Icon(
+                        module?.let { moduleIcon(it) } ?: Icons.Rounded.History, 
+                        null, 
+                        tint = accent, 
+                        modifier = Modifier.size(26.dp)
+                    )
+                }
             }
         }
-
-        // Info
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
                 Text(
-                    text = moduleType?.title ?: item.moduleType,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = accent,
-                    fontWeight = FontWeight.SemiBold
+                    module?.title ?: item.moduleType, 
+                    style = MaterialTheme.typography.labelLarge, 
+                    color = accent, 
+                    fontWeight = FontWeight.Bold
                 )
-                Text(time, style = MaterialTheme.typography.labelSmall, color = colors.subtext)
+                Text(time, style = MaterialTheme.typography.labelSmall, color = c.subtext)
             }
-            Text(
-                text    = item.summary,
-                style   = MaterialTheme.typography.bodySmall,
-                color   = colors.onSurface,
-                maxLines = 2,
-            )
+            Text(item.summary, style = MaterialTheme.typography.bodySmall, color = c.onSurface, maxLines = 2)
         }
-
-        // Selection check
-        if (isSelected) {
-            Icon(Icons.Rounded.CheckCircle, null, tint = accent, modifier = Modifier.size(22.dp))
+        if (selected) {
+            Icon(Icons.Rounded.CheckCircle, null, tint = accent, modifier = Modifier.size(20.dp))
         } else {
-            Icon(Icons.Rounded.ChevronRight, null, tint = colors.subtext, modifier = Modifier.size(18.dp))
+            Icon(Icons.Rounded.ChevronRight, null, tint = c.subtext, modifier = Modifier.size(16.dp))
         }
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// EMPTY STATE
-// ─────────────────────────────────────────────────────────────────────────────
-
 @Composable
-private fun EmptyHistoryState() {
-    val colors = smartColors
-    Box(Modifier.fillMaxSize(), Alignment.Center) {
+private fun EmptyHistory(pad: PaddingValues) {
+    val c = svColors
+    Box(Modifier.fillMaxSize().padding(pad), Alignment.Center) {
         Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally, 
+            verticalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier.padding(32.dp)
         ) {
             Box(
-                modifier = Modifier
-                    .size(88.dp)
-                    .background(colors.card, CircleShape)
-                    .border(1.dp, colors.cardBorder, CircleShape),
-                contentAlignment = Alignment.Center
+                Modifier.size(80.dp).background(c.card, CircleShape).border(1.dp, c.border, CircleShape), 
+                Alignment.Center
             ) {
-                Icon(
-                    Icons.Rounded.History, null,
-                    tint = colors.subtext,
-                    modifier = Modifier.size(44.dp)
-                )
+                Icon(Icons.Rounded.History, null, tint = c.subtext, modifier = Modifier.size(40.dp))
             }
-            Text("No scans yet", style = MaterialTheme.typography.headlineSmall, color = colors.onSurface, fontWeight = FontWeight.SemiBold)
             Text(
-                "Your scan history will appear here.\nStart by scanning an object or text.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = colors.subtext
+                "No scans yet", 
+                style = MaterialTheme.typography.headlineSmall, 
+                color = c.onSurface, 
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                "Your scan history will appear here.", 
+                style = MaterialTheme.typography.bodyMedium, 
+                color = c.subtext
             )
         }
     }

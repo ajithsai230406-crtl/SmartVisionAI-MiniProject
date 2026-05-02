@@ -10,65 +10,71 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SETTINGS VIEW MODEL
-// ─────────────────────────────────────────────────────────────────────────────
-
-data class SettingsUiState(
-    val appTheme:      String  = "DARK",
-    val ttsEnabled:    Boolean = true,
-    val saveHistory:   Boolean = true,
+data class SettingsState(
+    val theme: String = "DARK",
+    val tts: Boolean = true,
+    val history: Boolean = true,
     val liveDetection: Boolean = false,
-    val defaultLang:   String  = "en"
+    val autoDeleteDays: Int = 7,
+    val defaultLang: String = "en"
 )
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val prefs: UserPreferencesRepository,
-    private val auth:  FirebaseAuth
+    val auth: FirebaseAuth
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(SettingsUiState())
-    val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
+    private val _state = MutableStateFlow(SettingsState())
+    val state: StateFlow<SettingsState> = _state.asStateFlow()
 
     init {
         viewModelScope.launch {
-            prefs.allPrefsFlow.collect { p ->
-                _uiState.update {
-                    it.copy(
-                        appTheme      = p.appTheme,
-                        ttsEnabled    = p.enableTts,
-                        saveHistory   = p.saveHistory,
-                        liveDetection = p.liveDetection,
-                        defaultLang   = p.defaultLanguage
-                    )
-                }
+            combine(
+                prefs.appThemeFlow,
+                prefs.ttsEnabledFlow,
+                prefs.saveHistoryFlow,
+                prefs.liveDetFlow
+            ) { theme, tts, history, live ->
+                SettingsState(
+                    theme = theme,
+                    tts = tts,
+                    history = history,
+                    liveDetection = live,
+                    autoDeleteDays = _state.value.autoDeleteDays,
+                    defaultLang = _state.value.defaultLang
+                )
+            }.collect { newState ->
+                _state.value = newState
             }
         }
     }
 
-    fun setTheme(theme: AppTheme) {
-        viewModelScope.launch { prefs.setAppTheme(theme.name) }
+    fun setTheme(t: AppTheme) {
+        viewModelScope.launch { prefs.setAppTheme(t.name) }
     }
 
-    fun setTts(enabled: Boolean) {
-        viewModelScope.launch { prefs.setTtsEnabled(enabled) }
-        _uiState.update { it.copy(ttsEnabled = enabled) }
+    fun setTts(v: Boolean) {
+        viewModelScope.launch { prefs.setTts(v) }
     }
 
-    fun setSaveHistory(enabled: Boolean) {
-        viewModelScope.launch { prefs.setSaveHistory(enabled) }
-        _uiState.update { it.copy(saveHistory = enabled) }
+    fun setHistory(v: Boolean) {
+        viewModelScope.launch { prefs.setSaveHistory(v) }
     }
 
-    fun setLiveDetection(enabled: Boolean) {
-        viewModelScope.launch { prefs.setLiveDetection(enabled) }
-        _uiState.update { it.copy(liveDetection = enabled) }
+    fun setLive(v: Boolean) {
+        viewModelScope.launch { prefs.setLiveDetection(v) }
     }
 
-    fun signOut() { auth.signOut() }
+    fun setAutoDelete(days: Int) {
+        _state.update { it.copy(autoDeleteDays = days) }
+    }
 
-    val isLoggedIn: Boolean get() = auth.currentUser != null
-    val userEmail:  String  get() = auth.currentUser?.email ?: "Guest"
-    val userName:   String  get() = auth.currentUser?.displayName ?: "User"
+    fun signOut() {
+        auth.signOut()
+    }
+
+    val userName get() = auth.currentUser?.displayName ?: "Guest"
+    val userEmail get() = auth.currentUser?.email ?: "Not signed in"
+    val isLoggedIn get() = auth.currentUser != null
 }

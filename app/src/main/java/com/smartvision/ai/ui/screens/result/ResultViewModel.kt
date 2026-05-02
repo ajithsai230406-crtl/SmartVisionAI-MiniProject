@@ -29,7 +29,7 @@ class ResultViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(ResultUiState())
     val uiState: StateFlow<ResultUiState> = _uiState.asStateFlow()
 
-    fun loadResult(moduleRoute: String) {
+    fun load() {
         viewModelScope.launch {
             val result    = resultRepository.getCachedResult()
             val imagePath = resultRepository.getCachedImagePath()
@@ -56,13 +56,13 @@ class ResultViewModel @Inject constructor(
         }
     }
 
-    fun copyToClipboard() {
+    fun copy() {
         val text = getResultText() ?: return
         val cm   = getApplication<Application>().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         cm.setPrimaryClip(ClipData.newPlainText("SmartVision", text))
     }
 
-    fun shareResult() {
+    fun share() {
         val text   = getResultText() ?: return
         val intent = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"; putExtra(Intent.EXTRA_TEXT, text)

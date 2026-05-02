@@ -1,71 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Adaptive icon foreground: camera lens with AI rings -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-
-    <!-- Outer ring -->
-    <path
-        android:strokeColor="#00E5CC"
-        android:strokeWidth="2.5"
-        android:fillColor="@android:color/transparent"
-        android:pathData="M54,18 A36,36 0 1,1 53.99,18 Z"/>
-
-    <!-- Middle ring -->
-    <path
-        android:strokeColor="#00E5CC"
-        android:strokeWidth="1.5"
-        android:strokeAlpha="0.5"
-        android:fillColor="@android:color/transparent"
-        android:pathData="M54,10 A44,44 0 1,1 53.99,10 Z"/>
-
-    <!-- Camera lens body -->
-    <path
-        android:fillColor="#00E5CC"
-        android:pathData="M54,32 A22,22 0 1,1 53.99,32 Z"/>
-
-    <!-- Inner lens circle -->
-    <path
-        android:fillColor="#080C0D"
-        android:pathData="M54,38 A16,16 0 1,1 53.99,38 Z"/>
-
-    <!-- Center dot -->
-    <path
-        android:fillColor="#00E5CC"
-        android:pathData="M54,48 A6,6 0 1,1 53.99,48 Z"/>
-
-    <!-- Corner brackets TL -->
-    <path
-        android:strokeColor="#00E5CC"
-        android:strokeWidth="3"
-        android:strokeLineCap="round"
-        android:fillColor="@android:color/transparent"
-        android:pathData="M24,34 L24,24 L34,24"/>
-
-    <!-- Corner brackets TR -->
-    <path
-        android:strokeColor="#00E5CC"
-        android:strokeWidth="3"
-        android:strokeLineCap="round"
-        android:fillColor="@android:color/transparent"
-        android:pathData="M74,24 L84,24 L84,34"/>
-
-    <!-- Corner brackets BL -->
-    <path
-        android:strokeColor="#00E5CC"
-        android:strokeWidth="3"
-        android:strokeLineCap="round"
-        android:fillColor="@android:color/transparent"
-        android:pathData="M24,74 L24,84 L34,84"/>
-
-    <!-- Corner brackets BR -->
-    <path
-        android:strokeColor="#00E5CC"
-        android:strokeWidth="3"
-        android:strokeLineCap="round"
-        android:fillColor="@android:color/transparent"
-        android:pathData="M84,74 L84,84 L74,84"/>
-
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#00E5FF"
+        android:pathData="M54,30 A24,24 0 1,1 53.9,30Z"/>
+    <path android:fillColor="#00E5FF"
+        android:pathData="M54,42 L54,66 M42,54 L66,54"
+        android:strokeColor="#00E5FF" android:strokeWidth="4"/>
 </vector>

@@ -1,4 +1,4 @@
-package com.example.smartvisionai.ui.screens
+package com.smartvision.ai.ui.screens
 
 import android.content.Intent
 import android.os.Bundle
@@ -20,7 +20,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.smartvisionai.MainActivity
+import com.smartvision.ai.MainActivity
 import kotlinx.coroutines.delay
 
 // ✅ NO @AndroidEntryPoint — Splash must NOT use Hilt
@@ -84,7 +84,7 @@ private fun SplashContent(onFinished: () -> Unit) {
         alpha.animateTo(1f, tween(400))
 
         // SAFER navigation trigger
-        kotlinx.coroutines.delay(2500)
+        delay(2500)
         onFinished()
     }
 

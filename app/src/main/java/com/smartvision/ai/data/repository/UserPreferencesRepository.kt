@@ -9,95 +9,27 @@ import kotlinx.coroutines.flow.*
 import javax.inject.Inject
 import javax.inject.Singleton
 
-// Extension to create a single DataStore instance per process
-private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "smartvision_prefs")
-
-// ─────────────────────────────────────────────────────────────────────────────
-// KEYS
-// ─────────────────────────────────────────────────────────────────────────────
-
-private object PrefsKeys {
-    val APP_THEME        = stringPreferencesKey("app_theme")          // AppTheme.name
-    val DEFAULT_LANG     = stringPreferencesKey("default_language")
-    val TTS_ENABLED      = booleanPreferencesKey("tts_enabled")
-    val SAVE_HISTORY     = booleanPreferencesKey("save_history")
-    val LIVE_DETECTION   = booleanPreferencesKey("live_detection")
-    val ONBOARDED        = booleanPreferencesKey("onboarded")
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// USER PREFERENCES REPOSITORY
-// ─────────────────────────────────────────────────────────────────────────────
+private val Context.dataStore: DataStore<Preferences> by preferencesDataStore("sv_prefs")
 
 @Singleton
 class UserPreferencesRepository @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
-
-    // ── Read flows ────────────────────────────────────────────────────────────
-
-    val appThemeFlow: Flow<String> = context.dataStore.data
-        .catch { emit(emptyPreferences()) }
-        .map { prefs -> prefs[PrefsKeys.APP_THEME] ?: "DARK" }
-
-    val ttsEnabledFlow: Flow<Boolean> = context.dataStore.data
-        .catch { emit(emptyPreferences()) }
-        .map { prefs -> prefs[PrefsKeys.TTS_ENABLED] ?: true }
-
-    val saveHistoryFlow: Flow<Boolean> = context.dataStore.data
-        .catch { emit(emptyPreferences()) }
-        .map { prefs -> prefs[PrefsKeys.SAVE_HISTORY] ?: true }
-
-    val liveDetectionFlow: Flow<Boolean> = context.dataStore.data
-        .catch { emit(emptyPreferences()) }
-        .map { prefs -> prefs[PrefsKeys.LIVE_DETECTION] ?: false }
-
-    val defaultLangFlow: Flow<String> = context.dataStore.data
-        .catch { emit(emptyPreferences()) }
-        .map { prefs -> prefs[PrefsKeys.DEFAULT_LANG] ?: "en" }
-
-    val onboardedFlow: Flow<Boolean> = context.dataStore.data
-        .catch { emit(emptyPreferences()) }
-        .map { prefs -> prefs[PrefsKeys.ONBOARDED] ?: false }
-
-    // ── Combined preferences ──────────────────────────────────────────────────
-
-    val allPrefsFlow: Flow<com.smartvision.ai.domain.models.UserPreferences> =
-        context.dataStore.data
-            .catch { emit(emptyPreferences()) }
-            .map { prefs ->
-                com.smartvision.ai.domain.models.UserPreferences(
-                    appTheme        = prefs[PrefsKeys.APP_THEME]      ?: "DARK",
-                    defaultLanguage = prefs[PrefsKeys.DEFAULT_LANG]   ?: "en",
-                    enableTts       = prefs[PrefsKeys.TTS_ENABLED]    ?: true,
-                    saveHistory     = prefs[PrefsKeys.SAVE_HISTORY]   ?: true,
-                    liveDetection   = prefs[PrefsKeys.LIVE_DETECTION] ?: false
-                )
-            }
-
-    // ── Write ─────────────────────────────────────────────────────────────────
-
-    suspend fun setAppTheme(theme: String) {
-        context.dataStore.edit { it[PrefsKeys.APP_THEME] = theme }
+    private object Keys {
+        val THEME    = stringPreferencesKey("app_theme")
+        val TTS      = booleanPreferencesKey("tts_enabled")
+        val HISTORY  = booleanPreferencesKey("save_history")
+        val LIVE     = booleanPreferencesKey("live_detection")
+        val LANG     = stringPreferencesKey("default_lang")
     }
 
-    suspend fun setTtsEnabled(enabled: Boolean) {
-        context.dataStore.edit { it[PrefsKeys.TTS_ENABLED] = enabled }
-    }
+    val appThemeFlow:    Flow<String>  = context.dataStore.data.catch { emit(emptyPreferences()) }.map { it[Keys.THEME]   ?: "DARK" }
+    val ttsEnabledFlow:  Flow<Boolean> = context.dataStore.data.catch { emit(emptyPreferences()) }.map { it[Keys.TTS]     ?: true }
+    val saveHistoryFlow: Flow<Boolean> = context.dataStore.data.catch { emit(emptyPreferences()) }.map { it[Keys.HISTORY] ?: true }
+    val liveDetFlow:     Flow<Boolean> = context.dataStore.data.catch { emit(emptyPreferences()) }.map { it[Keys.LIVE]    ?: false }
 
-    suspend fun setSaveHistory(enabled: Boolean) {
-        context.dataStore.edit { it[PrefsKeys.SAVE_HISTORY] = enabled }
-    }
-
-    suspend fun setLiveDetection(enabled: Boolean) {
-        context.dataStore.edit { it[PrefsKeys.LIVE_DETECTION] = enabled }
-    }
-
-    suspend fun setDefaultLang(code: String) {
-        context.dataStore.edit { it[PrefsKeys.DEFAULT_LANG] = code }
-    }
-
-    suspend fun setOnboarded(value: Boolean) {
-        context.dataStore.edit { it[PrefsKeys.ONBOARDED] = value }
-    }
+    suspend fun setAppTheme(v: String)  { context.dataStore.edit { it[Keys.THEME]   = v } }
+    suspend fun setTts(v: Boolean)      { context.dataStore.edit { it[Keys.TTS]     = v } }
+    suspend fun setSaveHistory(v: Boolean) { context.dataStore.edit { it[Keys.HISTORY] = v } }
+    suspend fun setLiveDetection(v: Boolean) { context.dataStore.edit { it[Keys.LIVE]  = v } }
 }

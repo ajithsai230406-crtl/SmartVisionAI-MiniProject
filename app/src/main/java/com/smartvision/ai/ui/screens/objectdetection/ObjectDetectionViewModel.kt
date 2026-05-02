@@ -38,9 +38,14 @@ class ObjectDetectionViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
             try {
-                val bmp    = android.graphics.BitmapFactory.decodeFile(bitmapPath)
-                val result = useCase(bmp)
-                _uiState.update { it.copy(result = result, isLoading = false) }
+                val bmp = android.graphics.BitmapFactory.decodeFile(bitmapPath)
+                if (bmp != null) {
+                    val result = useCase(bmp)
+                    repository.cacheResult(result)
+                    _uiState.update { it.copy(result = result, isLoading = false, error = null) }
+                } else {
+                    _uiState.update { it.copy(isLoading = false, error = "Failed to load image") }
+                }
             } catch (e: Exception) {
                 _uiState.update { it.copy(error = e.message, isLoading = false) }
             }

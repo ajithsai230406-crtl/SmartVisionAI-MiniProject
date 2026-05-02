@@ -5,6 +5,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.*
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
@@ -14,297 +15,138 @@ import androidx.compose.ui.draw.*
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.*
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.*
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.smartvision.ai.ui.theme.*
 
+// ── Login Screen ──────────────────────────────────────────────────────────────
+
 @Composable
-fun LoginScreen(
-    onLoginSuccess: () -> Unit,
-    viewModel: AuthViewModel = hiltViewModel()
-) {
-    val colors  = smartColors
-    val uiState by viewModel.uiState.collectAsState()
-
-    var email        by remember { mutableStateOf("") }
-    var password     by remember { mutableStateOf("") }
-    var showPassword by remember { mutableStateOf(false) }
-    var isSignUp     by remember { mutableStateOf(false) }
-
-    var visible by remember { mutableStateOf(false) }
+fun LoginScreen(onLoginSuccess: () -> Unit, vm: AuthViewModel = hiltViewModel()) {
+    val c = svColors
+    val s by vm.state.collectAsState()
+    var email    by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var name     by remember { mutableStateOf("") }
+    var showPw   by remember { mutableStateOf(false) }
+    var visible  by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { visible = true }
+    LaunchedEffect(s.isLoggedIn) { if (s.isLoggedIn) onLoginSuccess() }
 
-    LaunchedEffect(uiState.isLoggedIn) {
-        if (uiState.isLoggedIn) onLoginSuccess()
-    }
+    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(c.background, c.surface)))) {
+        // Background glows
+        Box(Modifier.size(360.dp).offset(x = 80.dp, y = (-70).dp)
+            .background(Brush.radialGradient(listOf(c.primary.copy(.07f), Color.Transparent)), CircleShape))
+        Box(Modifier.size(280.dp).align(Alignment.BottomStart).offset(x = (-50).dp, y = 70.dp)
+            .background(Brush.radialGradient(listOf(c.secondary.copy(.05f), Color.Transparent)), CircleShape))
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    listOf(colors.background, colors.surface)
-                )
-            )
-    ) {
-        // Background decoration
-        Box(
-            modifier = Modifier
-                .size(400.dp)
-                .offset(x = 100.dp, y = (-80).dp)
-                .background(
-                    Brush.radialGradient(listOf(colors.primary.copy(0.08f), Color.Transparent)),
-                    CircleShape
-                )
-        )
-        Box(
-            modifier = Modifier
-                .size(300.dp)
-                .align(Alignment.BottomStart)
-                .offset(x = (-60).dp, y = 80.dp)
-                .background(
-                    Brush.radialGradient(listOf(colors.secondary.copy(0.06f), Color.Transparent)),
-                    CircleShape
-                )
-        )
+        Column(Modifier.fillMaxSize().padding(horizontal = 26.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 28.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            // ── Logo / Hero ───────────────────────────────────────────────────
             AnimatedVisibility(visible, enter = fadeIn(tween(700)) + slideInVertically(tween(700)) { -30 }) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(88.dp)
-                            .background(
-                                Brush.linearGradient(listOf(colors.primary, colors.secondary)),
-                                RoundedCornerShape(26.dp)
-                            )
-                            .shadow(16.dp, RoundedCornerShape(26.dp)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.RemoveRedEye,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(44.dp)
-                        )
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Box(Modifier.size(80.dp).background(Brush.linearGradient(listOf(c.primary, c.secondary)), RoundedCornerShape(24.dp)), Alignment.Center) {
+                        Icon(Icons.Rounded.RemoveRedEye, null, tint = Color.White, modifier = Modifier.size(40.dp))
                     }
-                    Text(
-                        text       = "SmartVision AI",
-                        style      = MaterialTheme.typography.displaySmall,
-                        color      = colors.onSurface,
-                        fontWeight = FontWeight.ExtraBold
-                    )
-                    Text(
-                        text  = "Your next-gen AI scanner",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.subtext
-                    )
+                    Text("SmartVision AI", style = MaterialTheme.typography.displaySmall, color = c.onSurface, fontWeight = FontWeight.ExtraBold)
+                    Text("Next-gen AI Scanner", style = MaterialTheme.typography.bodyMedium, color = c.subtext)
                 }
             }
 
-            Spacer(Modifier.height(40.dp))
+            Spacer(Modifier.height(36.dp))
 
-            // ── Auth Card ─────────────────────────────────────────────────────
             AnimatedVisibility(visible, enter = fadeIn(tween(700, 200)) + slideInVertically(tween(700, 200)) { 40 }) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(28.dp))
-                        .background(colors.card)
-                        .border(1.dp, colors.cardBorder, RoundedCornerShape(28.dp))
-                        .padding(24.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    // Tab: Sign In / Sign Up
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(colors.surface),
-                    ) {
-                        listOf("Sign In" to false, "Sign Up" to true).forEach { (label, mode) ->
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(
-                                        if (isSignUp == mode)
-                                            Brush.linearGradient(listOf(colors.primary.copy(0.2f), colors.secondary.copy(0.1f)))
-                                        else Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
-                                    )
-                                    .border(
-                                        if (isSignUp == mode) 1.dp else 0.dp,
-                                        if (isSignUp == mode) colors.primary.copy(0.4f) else Color.Transparent,
-                                        RoundedCornerShape(14.dp)
-                                    )
-                                    .clickable { isSignUp = mode }
-                                    .padding(vertical = 12.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text  = label,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = if (isSignUp == mode) colors.primary else colors.subtext,
-                                    fontWeight = if (isSignUp == mode) FontWeight.SemiBold else FontWeight.Normal
-                                )
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp)).background(c.card)
+                    .border(1.dp, c.border, RoundedCornerShape(26.dp)).padding(22.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)) {
+
+                    // Tab
+                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.surface)) {
+                        listOf("Sign In" to false, "Sign Up" to true).forEach { (label, isUp) ->
+                            Box(Modifier.weight(1f).clip(RoundedCornerShape(12.dp))
+                                .background(if (s.isSignUp == isUp) c.primary.copy(.18f) else Color.Transparent)
+                                .clickable { vm.toggleMode() }.padding(vertical = 11.dp), Alignment.Center) {
+                                Text(label, style = MaterialTheme.typography.titleMedium,
+                                    color = if (s.isSignUp == isUp) c.primary else c.subtext,
+                                    fontWeight = if (s.isSignUp == isUp) FontWeight.SemiBold else FontWeight.Normal)
                             }
                         }
                     }
 
-                    // Email field
-                    AuthTextField(
-                        value        = email,
-                        onValueChange = { email = it },
-                        label        = "Email",
-                        icon         = Icons.Rounded.Email,
-                        keyboardType = KeyboardType.Email
-                    )
+                    // Name field (sign up only)
+                    if (s.isSignUp) AuthField(name, { name = it }, "Full Name", Icons.Rounded.Person)
 
-                    // Password field
-                    AuthTextField(
-                        value         = password,
-                        onValueChange = { password = it },
-                        label         = "Password",
-                        icon          = Icons.Rounded.Lock,
-                        visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
-                        trailingIcon  = {
-                            IconButton(onClick = { showPassword = !showPassword }) {
-                                Icon(
-                                    if (showPassword) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff,
-                                    null,
-                                    tint = colors.subtext
-                                )
+                    // Email
+                    AuthField(email, { email = it }, "Email", Icons.Rounded.Email, KeyboardType.Email)
+
+                    // Password
+                    AuthField(password, { password = it }, "Password", Icons.Rounded.Lock,
+                        visualTransformation = if (showPw) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailing = {
+                            IconButton(onClick = { showPw = !showPw }) {
+                                Icon(if (showPw) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff, null, tint = c.subtext)
                             }
-                        }
-                    )
+                        })
 
                     // Error
-                    if (uiState.error != null) {
-                        Text(
-                            text  = uiState.error!!,
-                            color = colors.error,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
+                    s.error?.let { Text(it, color = c.error, style = MaterialTheme.typography.bodySmall) }
 
-                    // Submit button
-                    Button(
-                        onClick = {
-                            if (isSignUp) viewModel.signUp(email, password)
-                            else viewModel.signIn(email, password)
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(52.dp),
-                        shape  = RoundedCornerShape(16.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = colors.primary,
-                            contentColor   = Color.Black
-                        ),
-                        enabled = email.isNotEmpty() && password.isNotEmpty() && !uiState.isLoading
-                    ) {
-                        if (uiState.isLoading) {
-                            CircularProgressIndicator(Modifier.size(22.dp), color = Color.Black, strokeWidth = 2.dp)
-                        } else {
-                            Text(
-                                if (isSignUp) "Create Account" else "Sign In",
-                                fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                        }
+                    // Submit
+                    Button(onClick = { if (s.isSignUp) vm.signUp(email, password, name) else vm.signIn(email, password) },
+                        modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = c.primary, contentColor = Color.Black),
+                        enabled = !s.isLoading) {
+                        if (s.isLoading) CircularProgressIndicator(Modifier.size(20.dp), color = Color.Black, strokeWidth = 2.dp)
+                        else Text(if (s.isSignUp) "Create Account" else "Sign In", fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleMedium)
                     }
 
                     // Divider
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Divider(modifier = Modifier.weight(1f), color = colors.cardBorder)
-                        Text("or", style = MaterialTheme.typography.bodySmall, color = colors.subtext)
-                        Divider(modifier = Modifier.weight(1f), color = colors.cardBorder)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        HorizontalDivider(Modifier.weight(1f), color = c.border)
+                        Text("or", style = MaterialTheme.typography.bodySmall, color = c.subtext)
+                        HorizontalDivider(Modifier.weight(1f), color = c.border)
                     }
 
                     // Google Sign-In
-                    OutlinedButton(
-                        onClick  = { viewModel.signInWithGoogle() },
-                        modifier = Modifier.fillMaxWidth().height(52.dp),
-                        shape    = RoundedCornerShape(16.dp),
-                        border   = BorderStroke(1.dp, colors.cardBorder),
-                        colors   = ButtonDefaults.outlinedButtonColors(contentColor = colors.onSurface)
-                    ) {
-                        Icon(
-                            Icons.Rounded.AccountCircle,
-                            null,
-                            tint = colors.primary,
-                            modifier = Modifier.size(22.dp)
-                        )
+                    OutlinedButton(onClick = { /* launcher.launch(googleSignInIntent) — wire in Activity */ },
+                        modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(1.dp, c.border),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = c.onSurface)) {
+                        Icon(Icons.Rounded.AccountCircle, null, tint = c.primary, modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(10.dp))
                         Text("Continue with Google", fontWeight = FontWeight.Medium)
                     }
                 }
             }
 
-            Spacer(Modifier.height(24.dp))
-
-            // Skip / Guest
+            Spacer(Modifier.height(20.dp))
             AnimatedVisibility(visible, enter = fadeIn(tween(700, 400))) {
-                TextButton(onClick = onLoginSuccess) {
-                    Text("Continue without account", color = colors.subtext, style = MaterialTheme.typography.bodyMedium)
+                TextButton(onClick = { vm.skipLogin() }) {
+                    Text("Continue without account", color = c.subtext, style = MaterialTheme.typography.bodyMedium)
                 }
             }
         }
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// AUTH TEXT FIELD
-// ─────────────────────────────────────────────────────────────────────────────
-
 @Composable
-private fun AuthTextField(
-    value:                String,
-    onValueChange:        (String) -> Unit,
-    label:                String,
-    icon:                 androidx.compose.ui.graphics.vector.ImageVector,
-    keyboardType:         KeyboardType = KeyboardType.Text,
+private fun AuthField(
+    value: String, onChange: (String) -> Unit, label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    keyboardType: KeyboardType = KeyboardType.Text,
     visualTransformation: VisualTransformation = VisualTransformation.None,
-    trailingIcon:         @Composable (() -> Unit)? = null
+    trailing: @Composable (() -> Unit)? = null
 ) {
-    val colors = smartColors
-    OutlinedTextField(
-        value            = value,
-        onValueChange    = onValueChange,
-        label            = { Text(label) },
-        leadingIcon      = { Icon(icon, null, tint = colors.primary, modifier = Modifier.size(20.dp)) },
-        trailingIcon     = trailingIcon,
-        visualTransformation = visualTransformation,
-        keyboardOptions  = KeyboardOptions(keyboardType = keyboardType),
-        singleLine       = true,
-        modifier         = Modifier.fillMaxWidth(),
-        shape            = RoundedCornerShape(16.dp),
-        colors           = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor     = colors.primary,
-            unfocusedBorderColor   = colors.cardBorder,
-            focusedLabelColor      = colors.primary,
-            unfocusedLabelColor    = colors.subtext,
-            focusedTextColor       = colors.onSurface,
-            unfocusedTextColor     = colors.onSurface,
-            cursorColor            = colors.primary,
-            focusedContainerColor  = colors.card,
-            unfocusedContainerColor = colors.card
-        )
-    )
+    val c = svColors
+    OutlinedTextField(value, onChange, label = { Text(label) },
+        leadingIcon = { Icon(icon, null, tint = c.primary, modifier = Modifier.size(20.dp)) },
+        trailingIcon = trailing, visualTransformation = visualTransformation, singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+        modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = c.primary, unfocusedBorderColor = c.border,
+            focusedLabelColor = c.primary, unfocusedLabelColor = c.subtext,
+            focusedTextColor = c.onSurface, unfocusedTextColor = c.onSurface,
+            cursorColor = c.primary, focusedContainerColor = c.card, unfocusedContainerColor = c.card))
 }

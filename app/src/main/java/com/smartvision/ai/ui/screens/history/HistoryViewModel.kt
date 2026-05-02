@@ -11,16 +11,16 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class HistoryUiState(
-    val items:       List<ScanHistoryItem> = emptyList(),
-    val selectedIds: Set<String>           = emptySet(),
-    val isLoading:   Boolean               = false,
-    val error:       String?               = null
+    val items: List<ScanHistoryItem> = emptyList(),
+    val selectedIds: Set<String> = emptySet(),
+    val isLoading: Boolean = false,
+    val error: String? = null
 )
 
 @HiltViewModel
 class HistoryViewModel @Inject constructor(
-    private val repository: ResultRepository,
-    private val auth:       FirebaseAuth
+    private val repo: ResultRepository,
+    private val auth: FirebaseAuth
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HistoryUiState())
@@ -30,30 +30,31 @@ class HistoryViewModel @Inject constructor(
         val uid = auth.currentUser?.uid ?: return
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
-            repository.getHistory(uid).fold(
-                onSuccess = { items -> _uiState.update { it.copy(items = items, isLoading = false) } },
-                onFailure = { err  -> _uiState.update { it.copy(error = err.message, isLoading = false) } }
+            repo.getHistory(uid).fold(
+                onSuccess = { items ->
+                    _uiState.update { it.copy(items = items, isLoading = false) }
+                },
+                onFailure = { err ->
+                    _uiState.update { it.copy(error = err.message, isLoading = false) }
+                }
             )
         }
     }
 
     fun toggleSelection(id: String) {
-        _uiState.update { state ->
-            val newSet = if (id in state.selectedIds)
-                state.selectedIds - id
-            else
-                state.selectedIds + id
-            state.copy(selectedIds = newSet)
+        _uiState.update { s ->
+            val newSet = if (id in s.selectedIds) s.selectedIds - id else s.selectedIds + id
+            s.copy(selectedIds = newSet)
         }
     }
 
     fun deleteSelected() {
         viewModelScope.launch {
-            val ids = _uiState.value.selectedIds.toList()
-            ids.forEach { id -> repository.deleteHistory(id) }
-            _uiState.update { state ->
-                state.copy(
-                    items       = state.items.filter { it.id !in ids },
+            val selected = _uiState.value.selectedIds
+            selected.forEach { repo.deleteHistory(it) }
+            _uiState.update { s ->
+                s.copy(
+                    items = s.items.filter { it.id !in selected },
                     selectedIds = emptySet()
                 )
             }

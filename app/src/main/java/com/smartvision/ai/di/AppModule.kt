@@ -1,12 +1,14 @@
 package com.smartvision.ai.di
 
-import dagger.Module
+import com.smartvision.ai.data.repository.*
+import com.smartvision.ai.domain.usecase.*
+import dagger.*
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import javax.inject.Singleton
 
 @Module
 @InstallIn(SingletonComponent::class)
-object AppModule {
-    // This module can be used for other project-wide providers.
-    // UseCase bindings are in UseCaseModule.kt
+abstract class RepositoryModule {
+    @Binds @Singleton abstract fun bindResultRepo(impl: ResultRepositoryImpl): ResultRepository
 }

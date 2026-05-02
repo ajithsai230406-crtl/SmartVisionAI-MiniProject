@@ -1,8 +1,8 @@
 package com.smartvision.ai.ui.screens.ocr
 
-import androidx.compose.animation.core.*
+import android.app.Application
+import android.content.*
 import androidx.compose.foundation.*
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.*
@@ -15,247 +15,152 @@ import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.*
 import androidx.compose.ui.graphics.*
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.*
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.*
 import coil.compose.AsyncImage
 import com.smartvision.ai.domain.models.*
-import com.smartvision.ai.ui.components.*
+import com.smartvision.ai.domain.usecase.*
+import com.smartvision.ai.ui.components.SmartVisionTopBar
 import com.smartvision.ai.ui.theme.*
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
+import javax.inject.Inject
 
-// ─────────────────────────────────────────────────────────────────────────────
-// OCR SCREEN — with drag-to-select area
-// ─────────────────────────────────────────────────────────────────────────────
-
+// ── Screen ────────────────────────────────────────────────────────────────────
 @Composable
-fun OcrScreen(
-    onBack:    () -> Unit,
-    viewModel: OcrViewModel = hiltViewModel()
-) {
-    val colors  = smartColors
-    val uiState by viewModel.uiState.collectAsState()
-
-    // Selection drag state (normalised 0.0–1.0)
-    var dragStart  by remember { mutableStateOf(Offset.Zero) }
-    var dragEnd    by remember { mutableStateOf(Offset.Zero) }
+fun OcrScreen(onBack: () -> Unit, onTranslate: ((String) -> Unit)? = null, vm: OcrViewModel = hiltViewModel()) {
+    val c = svColors; val s by vm.uiState.collectAsState()
+    val accent = SVColors.purple
+    var dragStart by remember { mutableStateOf(Offset.Zero) }
+    var dragEnd   by remember { mutableStateOf(Offset.Zero) }
     var isDragging by remember { mutableStateOf(false) }
     var canvasSize by remember { mutableStateOf(Size.Zero) }
 
     Scaffold(
-        topBar = {
-            SmartVisionTopBar(title = "Text Scanner (OCR)", onBack = onBack) {
-                if (uiState.selectedText.isNotEmpty()) {
-                    IconButton(onClick = viewModel::copySelected) {
-                        Icon(Icons.Rounded.ContentCopy, null, tint = colors.primary)
-                    }
-                    IconButton(onClick = viewModel::speakSelected) {
-                        Icon(Icons.Rounded.VolumeUp, null, tint = colors.primary)
-                    }
-                }
+        topBar = { SmartVisionTopBar("Text Scanner (OCR)", onBack = onBack) {
+            if (s.selectedText.isNotEmpty() || s.fullText.isNotEmpty()) {
+                IconButton(onClick = { vm.copySelected() }) { Icon(Icons.Rounded.ContentCopy, null, tint = c.primary) }
+                IconButton(onClick = { vm.speakSelected() }) { Icon(Icons.Rounded.VolumeUp, null, tint = c.primary) }
             }
-        },
-        containerColor = colors.background
-    ) { padding ->
-        Column(
-            modifier = Modifier.fillMaxSize().padding(padding),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
+        }},
+        containerColor = c.background
+    ) { pad ->
+        Column(Modifier.fillMaxSize().padding(pad), verticalArrangement = Arrangement.spacedBy(12.dp)) {
 
-            // ── Image with selectable overlay ─────────────────────────────────
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(0.55f)
-                    .padding(horizontal = 16.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(colors.card)
-                    .border(1.dp, colors.cardBorder, RoundedCornerShape(20.dp))
-                    .pointerInput(Unit) {
-                        detectDragGestures(
-                            onDragStart = { offset ->
-                                isDragging = true
-                                dragStart  = offset
-                                dragEnd    = offset
-                            },
-                            onDrag = { change, _ ->
-                                dragEnd = change.position
-                                // Extract text inside selection
-                                if (canvasSize != Size.Zero) {
-                                    val normRect = Rect(
-                                        left   = (minOf(dragStart.x, dragEnd.x) / canvasSize.width).coerceIn(0f, 1f),
-                                        top    = (minOf(dragStart.y, dragEnd.y) / canvasSize.height).coerceIn(0f, 1f),
-                                        right  = (maxOf(dragStart.x, dragEnd.x) / canvasSize.width).coerceIn(0f, 1f),
-                                        bottom = (maxOf(dragStart.y, dragEnd.y) / canvasSize.height).coerceIn(0f, 1f)
-                                    )
-                                    viewModel.selectArea(normRect)
-                                }
-                            },
-                            onDragEnd = { isDragging = false }
-                        )
-                    }
-            ) {
-                // Placeholder image (in production: show captured bitmap via Coil)
-                Box(
-                    modifier = Modifier.fillMaxSize().background(colors.surface),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (uiState.imagePath == null) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Rounded.TextFields, null, tint = SmartVisionColors.textScanner, modifier = Modifier.size(56.dp))
-                            Spacer(Modifier.height(8.dp))
-                            Text("Capture or load an image", style = MaterialTheme.typography.bodyMedium, color = colors.subtext)
-                        }
-                    } else {
-                        AsyncImage(
-                            model              = uiState.imagePath,
-                            contentDescription = null,
-                            modifier           = Modifier.fillMaxSize().onSizeChanged { size ->
-                                canvasSize = Size(size.width.toFloat(), size.height.toFloat())
+            // Image with drag-to-select overlay
+            Box(Modifier.fillMaxWidth().weight(.55f).padding(horizontal = 14.dp)
+                .clip(RoundedCornerShape(18.dp)).background(c.card)
+                .border(1.dp, accent.copy(.3f), RoundedCornerShape(18.dp))
+                .pointerInput(Unit) {
+                    detectDragGestures(
+                        onDragStart = { offset -> isDragging = true; dragStart = offset; dragEnd = offset },
+                        onDrag = { change, _ ->
+                            dragEnd = change.position
+                            if (canvasSize != Size.Zero) {
+                                val r = Rect(
+                                    (minOf(dragStart.x, dragEnd.x) / canvasSize.width).coerceIn(0f,1f),
+                                    (minOf(dragStart.y, dragEnd.y) / canvasSize.height).coerceIn(0f,1f),
+                                    (maxOf(dragStart.x, dragEnd.x) / canvasSize.width).coerceIn(0f,1f),
+                                    (maxOf(dragStart.y, dragEnd.y) / canvasSize.height).coerceIn(0f,1f)
+                                )
+                                vm.selectArea(r)
                             }
-                        )
-                    }
+                        },
+                        onDragEnd = { isDragging = false }
+                    )
                 }
-
-                // Text block highlights
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    uiState.textBlocks.forEach { block ->
-                        val b = block.boundingBox
-                        drawRect(
-                            color    = SmartVisionColors.textScanner.copy(alpha = 0.2f),
-                            topLeft  = Offset(b.left * size.width, b.top * size.height),
-                            size     = Size((b.right - b.left) * size.width, (b.bottom - b.top) * size.height)
-                        )
-                        drawRect(
-                            color    = SmartVisionColors.textScanner,
-                            topLeft  = Offset(b.left * size.width, b.top * size.height),
-                            size     = Size((b.right - b.left) * size.width, (b.bottom - b.top) * size.height),
-                            style    = androidx.compose.ui.graphics.drawscope.Stroke(2f)
-                        )
-                    }
-
-                    // Drag selection box
-                    if (isDragging || uiState.selectedText.isNotEmpty()) {
-                        val selRect = Rect(
-                            left   = minOf(dragStart.x, dragEnd.x),
-                            top    = minOf(dragStart.y, dragEnd.y),
-                            right  = maxOf(dragStart.x, dragEnd.x),
-                            bottom = maxOf(dragStart.y, dragEnd.y)
-                        )
-                        drawRect(
-                            color    = Color(0x3300E5FF),
-                            topLeft  = Offset(selRect.left, selRect.top),
-                            size     = Size(selRect.width, selRect.height)
-                        )
-                        drawRect(
-                            color    = Color(0xFF00E5FF),
-                            topLeft  = Offset(selRect.left, selRect.top),
-                            size     = Size(selRect.width, selRect.height),
-                            style    = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx())
-                        )
-                        // Corner handles
-                        val handleRadius = 6.dp.toPx()
-                        listOf(
-                            Offset(selRect.left, selRect.top),
-                            Offset(selRect.right, selRect.top),
-                            Offset(selRect.left, selRect.bottom),
-                            Offset(selRect.right, selRect.bottom)
-                        ).forEach { corner ->
-                            drawCircle(Color(0xFF00E5FF), handleRadius, corner)
+            ) {
+                if (s.imagePath != null) {
+                    AsyncImage(s.imagePath, null, contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize().onSizeChanged { sz ->
+                            canvasSize = Size(sz.width.toFloat(), sz.height.toFloat())
+                        })
+                } else {
+                    Box(Modifier.fillMaxSize(), Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Rounded.TextFields, null, tint = accent, modifier = Modifier.size(52.dp))
+                            Spacer(Modifier.height(8.dp))
+                            Text("Capture image first", style = MaterialTheme.typography.bodyMedium, color = c.subtext)
                         }
                     }
                 }
 
-                // Instruction hint
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(8.dp)
-                        .background(Color.Black.copy(0.6f), RoundedCornerShape(8.dp))
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                ) {
-                    Text(
-                        text  = if (uiState.textBlocks.isEmpty()) "Drag to select text area"
-                                else "Drag over text to select",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = Color.White
-                    )
+                // Draw text block highlights + selection
+                androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+                    s.textBlocks.forEach { block ->
+                        val b = block.boundingBox
+                        drawRect(accent.copy(.18f), Offset(b.left * size.width, b.top * size.height),
+                            Size((b.right - b.left) * size.width, (b.bottom - b.top) * size.height))
+                        drawRect(accent, Offset(b.left * size.width, b.top * size.height),
+                            Size((b.right - b.left) * size.width, (b.bottom - b.top) * size.height),
+                            style = Stroke(1.8f))
+                    }
+                    // Selection rect
+                    if (isDragging || s.selectedText.isNotEmpty()) {
+                        val l = minOf(dragStart.x, dragEnd.x); val t = minOf(dragStart.y, dragEnd.y)
+                        val w = kotlin.math.abs(dragEnd.x - dragStart.x); val h = kotlin.math.abs(dragEnd.y - dragStart.y)
+                        drawRect(Color(0x3300E5FF), Offset(l, t), Size(w, h))
+                        drawRect(Color(0xFF00E5FF), Offset(l, t), Size(w, h), style = Stroke(2.2f))
+                        // Handles
+                        val hr = 7.dp.toPx()
+                        listOf(Offset(l, t), Offset(l+w, t), Offset(l, t+h), Offset(l+w, t+h))
+                            .forEach { drawCircle(Color(0xFF00E5FF), hr, it) }
+                    }
+                }
+                // Hint
+                Box(Modifier.align(Alignment.BottomCenter).padding(8.dp)
+                    .background(Color.Black.copy(.6f), RoundedCornerShape(7.dp))
+                    .padding(horizontal = 11.dp, vertical = 5.dp)) {
+                    Text(if (s.textBlocks.isEmpty()) "Drag to select text area" else "Drag to select specific text",
+                        style = MaterialTheme.typography.labelLarge, color = Color.White)
                 }
             }
 
-            // ── Extracted text panel ──────────────────────────────────────────
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(0.45f)
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment     = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = if (uiState.selectedText.isNotEmpty()) "Selected Text" else "Full Text",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = colors.onSurface,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    if (uiState.selectedText.isNotEmpty()) {
-                        TextButton(onClick = viewModel::clearSelection) {
-                            Text("Clear", color = colors.subtext)
-                        }
-                    }
+            // Text result panel
+            Column(Modifier.fillMaxWidth().weight(.45f).padding(horizontal = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+                    Text(if (s.selectedText.isNotEmpty()) "Selected Text" else "Full Text",
+                        style = MaterialTheme.typography.titleMedium, color = c.onSurface, fontWeight = FontWeight.SemiBold)
+                    if (s.selectedText.isNotEmpty())
+                        TextButton(onClick = { vm.clearSelection() }) { Text("Clear", color = c.subtext) }
                 }
-
-                val displayText = uiState.selectedText.ifEmpty { uiState.fullText }
-                if (displayText.isEmpty() && !uiState.isLoading) {
+                val displayText = s.selectedText.ifEmpty { s.fullText }
+                if (displayText.isEmpty()) {
                     Box(Modifier.fillMaxWidth().weight(1f), Alignment.Center) {
-                        Text("No text detected yet", style = MaterialTheme.typography.bodyMedium, color = colors.subtext)
+                        Text("No text detected yet", style = MaterialTheme.typography.bodyMedium, color = c.subtext)
                     }
                 } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f)
-                            .background(colors.card, RoundedCornerShape(16.dp))
-                            .border(1.dp, SmartVisionColors.textScanner.copy(0.3f), RoundedCornerShape(16.dp))
-                            .padding(16.dp)
-                            .verticalScroll(rememberScrollState())
-                    ) {
-                        androidx.compose.foundation.text.selection.SelectionContainer {
-                            Text(displayText, style = MaterialTheme.typography.bodyMedium, color = colors.onSurface)
-                        }
+                    Box(Modifier.fillMaxWidth().weight(1f)
+                        .clip(RoundedCornerShape(14.dp)).background(c.card)
+                        .border(1.dp, accent.copy(.28f), RoundedCornerShape(14.dp))
+                        .padding(14.dp).verticalScroll(rememberScrollState())) {
+                        SelectionContainer { Text(displayText, style = MaterialTheme.typography.bodyMedium, color = c.onSurface) }
                     }
                 }
-
                 // Action chips
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    listOf(
-                        Triple(Icons.Rounded.ContentCopy, "Copy",      viewModel::copySelected),
-                        Triple(Icons.Rounded.Translate,   "Translate", viewModel::translateSelected),
-                        Triple(Icons.Rounded.VolumeUp,    "Speak",     viewModel::speakSelected)
-                    ).forEach { (icon, label, action) ->
-                        FilterChip(
-                            selected = false,
-                            onClick  = action,
-                            label    = { Text(label, style = MaterialTheme.typography.labelLarge) },
-                            leadingIcon = { Icon(icon, null, modifier = Modifier.size(16.dp)) },
-                            colors   = FilterChipDefaults.filterChipColors(
-                                containerColor = colors.card,
-                                labelColor     = colors.onSurface,
-                                iconColor      = SmartVisionColors.textScanner
-                            )
-                        )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(Triple(Icons.Rounded.ContentCopy, "Copy", { vm.copySelected() }),
+                        Triple(Icons.Rounded.Translate, "Translate", {
+                            val t = s.selectedText.ifEmpty { s.fullText }
+                            onTranslate?.invoke(t)
+                            Unit
+                        }),
+                        Triple(Icons.Rounded.VolumeUp, "Speak", { vm.speakSelected() })).forEach { (icon, lbl, action) ->
+                        FilterChip(selected = false, onClick = action, label = { Text(lbl, style = MaterialTheme.typography.labelLarge) },
+                            leadingIcon = { Icon(icon, null, modifier = Modifier.size(15.dp)) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                containerColor = c.card, labelColor = c.onSurface, iconColor = accent))
                     }
                 }
             }
-
             Spacer(Modifier.height(8.dp))
         }
     }

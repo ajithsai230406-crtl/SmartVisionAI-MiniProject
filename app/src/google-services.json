@@ -1,21 +1,21 @@
 {
   "project_info": {
-    "project_number": "123456789012",
-    "project_id": "smartvision-ai-placeholder",
-    "storage_bucket": "smartvision-ai-placeholder.appspot.com"
+    "project_number": "336895546000",
+    "project_id": "smart-vision-ai-f03d2",
+    "storage_bucket": "smart-vision-ai-f03d2.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:123456789012:android:123456789012",
+        "mobilesdk_app_id": "1:336895546000:android:9e5994ea29d576e78f3e15",
         "android_client_info": {
-          "package_name": "com.example.smartvisionai"
+          "package_name": "com.smartvision.ai"
         }
       },
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "PLACEHOLDER_API_KEY"
+          "current_key": "AIzaSyBlaehGF0ZkUiA89ppdVLM8jW68aVtDthg"
         }
       ],
       "services": {

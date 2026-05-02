@@ -1,84 +1,125 @@
 package com.smartvision.ai.ui.screens.auth
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.auth.UserProfileChangeRequest
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 
-data class AuthUiState(
+data class AuthState(
     val isLoggedIn: Boolean = false,
-    val isLoading:  Boolean = false,
-    val error:      String? = null
+    val isLoading: Boolean = false,
+    val error: String? = null,
+    val isSignUp: Boolean = false
 )
 
 @HiltViewModel
 class AuthViewModel @Inject constructor(
-    private val auth: FirebaseAuth
-) : ViewModel() {
-
-    private val _uiState = MutableStateFlow(AuthUiState())
-    val uiState: StateFlow<AuthUiState> = _uiState.asStateFlow()
+    private val auth: FirebaseAuth,
+    app: Application
+) : AndroidViewModel(app) {
+    private val _s = MutableStateFlow(AuthState())
+    val state: StateFlow<AuthState> = _s.asStateFlow()
 
     init {
-        // Already logged in?
         if (auth.currentUser != null) {
-            _uiState.update { it.copy(isLoggedIn = true) }
+            _s.update { it.copy(isLoggedIn = true) }
         }
+    }
+
+    fun toggleMode() {
+        _s.update { it.copy(isSignUp = !it.isSignUp, error = null) }
     }
 
     fun signIn(email: String, password: String) {
+        if (!isValidEmail(email)) {
+            _s.update { it.copy(error = "Enter a valid email address") }
+            return
+        }
+        if (password.length < 6) {
+            _s.update { it.copy(error = "Password must be at least 6 characters") }
+            return
+        }
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, error = null) }
+            _s.update { it.copy(isLoading = true, error = null) }
             try {
                 auth.signInWithEmailAndPassword(email.trim(), password).await()
-                _uiState.update { it.copy(isLoggedIn = true, isLoading = false) }
+                _s.update { it.copy(isLoggedIn = true) }
             } catch (e: Exception) {
-                _uiState.update { it.copy(isLoading = false, error = e.message ?: "Sign-in failed") }
+                _s.update { it.copy(error = friendlyError(e)) }
+            } finally {
+                _s.update { it.copy(isLoading = false) }
             }
         }
     }
 
-    fun signUp(email: String, password: String) {
+    fun signUp(email: String, password: String, name: String) {
+        if (!isValidEmail(email)) {
+            _s.update { it.copy(error = "Enter a valid email address") }
+            return
+        }
+        if (password.length < 6) {
+            _s.update { it.copy(error = "Password must be at least 6 characters") }
+            return
+        }
+        if (name.isBlank()) {
+            _s.update { it.copy(error = "Please enter your name") }
+            return
+        }
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, error = null) }
+            _s.update { it.copy(isLoading = true, error = null) }
             try {
-                auth.createUserWithEmailAndPassword(email.trim(), password).await()
-                _uiState.update { it.copy(isLoggedIn = true, isLoading = false) }
+                val result = auth.createUserWithEmailAndPassword(email.trim(), password).await()
+                result.user?.updateProfile(
+                    UserProfileChangeRequest.Builder().setDisplayName(name.trim()).build()
+                )?.await()
+                _s.update { it.copy(isLoggedIn = true) }
             } catch (e: Exception) {
-                _uiState.update { it.copy(isLoading = false, error = e.message ?: "Sign-up failed") }
+                _s.update { it.copy(error = friendlyError(e)) }
+            } finally {
+                _s.update { it.copy(isLoading = false) }
             }
         }
     }
 
-    /**
-     * Called after Google Sign-In activity returns an ID token.
-     * Wire the Google Sign-In launcher in LoginScreen, pass idToken here.
-     */
     fun signInWithGoogleToken(idToken: String) {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, error = null) }
+            _s.update { it.copy(isLoading = true, error = null) }
             try {
-                val credential = GoogleAuthProvider.getCredential(idToken, null)
-                auth.signInWithCredential(credential).await()
-                _uiState.update { it.copy(isLoggedIn = true, isLoading = false) }
+                val cred = GoogleAuthProvider.getCredential(idToken, null)
+                auth.signInWithCredential(cred).await()
+                _s.update { it.copy(isLoggedIn = true) }
             } catch (e: Exception) {
-                _uiState.update { it.copy(isLoading = false, error = e.message ?: "Google sign-in failed") }
+                _s.update { it.copy(error = friendlyError(e)) }
+            } finally {
+                _s.update { it.copy(isLoading = false) }
             }
         }
     }
 
-    /** Placeholder — actual Google Sign-In launcher lives in LoginScreen composable */
-    fun signInWithGoogle() {
-        // Trigger the Google Sign-In intent via Activity Result API in LoginScreen
+    fun skipLogin() {
+        _s.update { it.copy(isLoggedIn = true) }
     }
 
     fun signOut() {
         auth.signOut()
-        _uiState.update { it.copy(isLoggedIn = false) }
+        _s.update { it.copy(isLoggedIn = false) }
+    }
+
+    private fun isValidEmail(email: String) =
+        android.util.Patterns.EMAIL_ADDRESS.matcher(email.trim()).matches()
+
+    private fun friendlyError(e: Exception) = when {
+        e.message?.contains("password") == true -> "Incorrect password. Please try again."
+        e.message?.contains("no user") == true -> "No account found with this email."
+        e.message?.contains("already in use") == true -> "This email is already registered."
+        e.message?.contains("network") == true -> "Network error. Check your connection."
+        else -> e.message ?: "Authentication failed"
     }
 }

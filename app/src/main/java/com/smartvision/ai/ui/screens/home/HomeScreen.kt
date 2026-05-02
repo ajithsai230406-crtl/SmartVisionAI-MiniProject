@@ -11,7 +11,7 @@ import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
-import androidx.compose.ui.draw.*
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
@@ -19,221 +19,89 @@ import com.smartvision.ai.domain.models.ModuleType
 import com.smartvision.ai.ui.components.*
 import com.smartvision.ai.ui.theme.*
 
-// ─────────────────────────────────────────────────────────────────────────────
-// HOME SCREEN
-// ─────────────────────────────────────────────────────────────────────────────
-
 @Composable
 fun HomeScreen(
-    onModuleClick:  (ModuleType) -> Unit,
+    onModuleClick: (ModuleType) -> Unit,
     onHistoryClick: () -> Unit,
-    onSettingsClick:() -> Unit,
-    onScanClick:    () -> Unit
+    onSettingsClick: () -> Unit,
+    onScanClick: () -> Unit
 ) {
-    val colors  = smartColors
-    val modules = ModuleType.entries
-
-    // Staggered entrance animation
+    val c = svColors
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { visible = true }
 
     Scaffold(
-        containerColor = colors.background,
+        containerColor = c.background,
         bottomBar = {
-            SmartVisionBottomBar(
-                selectedTab   = BottomTab.HOME,
-                onTabSelected = { tab ->
-                    when (tab) {
-                        BottomTab.SCAN     -> onScanClick()
-                        BottomTab.HISTORY  -> onHistoryClick()
-                        BottomTab.SETTINGS -> onSettingsClick()
-                        else -> {}
-                    }
+            SVBottomBar(selected = BottomTab.HOME, onTab = { tab ->
+                when (tab) {
+                    BottomTab.SCAN     -> onScanClick()
+                    BottomTab.HISTORY  -> onHistoryClick()
+                    BottomTab.SETTINGS -> onSettingsClick()
+                    else -> {}
                 }
-            )
+            })
         }
     ) { padding ->
         LazyVerticalGrid(
-            columns             = GridCells.Fixed(2),
-            contentPadding      = PaddingValues(
-                start  = 16.dp, end    = 16.dp,
-                top    = padding.calculateTopPadding(),
-                bottom = padding.calculateBottomPadding() + 16.dp
-            ),
-            verticalArrangement   = Arrangement.spacedBy(14.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            columns = GridCells.Fixed(2),
+            contentPadding = PaddingValues(start = 14.dp, end = 14.dp,
+                top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding() + 14.dp),
+            verticalArrangement   = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.fillMaxSize()
         ) {
-
-            // ── Header: Camera CTA + tagline (spans 2 columns) ───────────────
             item(span = { GridItemSpan(2) }) {
-                AnimatedVisibility(
-                    visible = visible,
-                    enter   = fadeIn(tween(600)) + slideInVertically(tween(600)) { -40 }
-                ) {
-                    HomeHeader(onScanClick = onScanClick, colors = colors)
+                AnimatedVisibility(visible, enter = fadeIn(tween(600)) + slideInVertically(tween(600)) { -30 }) {
+                    HomeHeader(onScanClick = onScanClick, c = c)
                 }
             }
-
-            // ── Section Label ────────────────────────────────────────────────
             item(span = { GridItemSpan(2) }) {
-                Text(
-                    text     = "M O D U L E S",
-                    style    = MaterialTheme.typography.labelLarge,
-                    color    = colors.subtext,
-                    fontWeight = FontWeight.SemiBold,
-                    letterSpacing = 3.sp,
-                    modifier = Modifier.padding(top = 8.dp, bottom = 2.dp)
-                )
+                Text("M O D U L E S", style = MaterialTheme.typography.labelLarge, color = c.subtext,
+                    fontWeight = FontWeight.SemiBold, letterSpacing = 3.sp,
+                    modifier = Modifier.padding(top = 6.dp, bottom = 2.dp))
             }
-
-            // ── Module Cards ─────────────────────────────────────────────────
-            itemsIndexed(modules) { index, module ->
-                val delay = index * 60
-                AnimatedVisibility(
-                    visible = visible,
-                    enter   = fadeIn(tween(500, delayMillis = delay)) +
-                              slideInVertically(tween(500, delayMillis = delay)) { 60 }
-                ) {
-                    ModuleCard(
-                        module  = module,
-                        onClick = { onModuleClick(module) }
-                    )
+            itemsIndexed(ModuleType.entries) { idx, module ->
+                AnimatedVisibility(visible, enter = fadeIn(tween(400, idx * 55)) + slideInVertically(tween(400, idx * 55)) { 50 }) {
+                    ModuleCard(module = module, onClick = { onModuleClick(module) })
                 }
             }
         }
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// HOME HEADER — Camera CTA card (inspired by Google Lens but unique)
-// ─────────────────────────────────────────────────────────────────────────────
-
 @Composable
-private fun HomeHeader(
-    onScanClick: () -> Unit,
-    colors: SmartVisionColorScheme
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 16.dp, bottom = 8.dp)
-    ) {
-        // App title row
-        Row(
-            modifier             = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment    = Alignment.CenterVertically
-        ) {
+private fun HomeHeader(onScanClick: () -> Unit, c: SVColorScheme) {
+    Column(modifier = Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 6.dp)) {
+        Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
             Column {
-                Text(
-                    text       = "SmartVision",
-                    style      = MaterialTheme.typography.displaySmall,
-                    color      = colors.onSurface,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text  = "AI-Powered Scanner",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colors.subtext
-                )
+                Text("SmartVision", style = MaterialTheme.typography.displaySmall, color = c.onSurface, fontWeight = FontWeight.Bold)
+                Text("AI-Powered Scanner", style = MaterialTheme.typography.bodyMedium, color = c.subtext)
             }
-            // Notification / avatar placeholder
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .background(colors.card, CircleShape)
-                    .border(1.dp, colors.cardBorder, CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.Rounded.Person, null, tint = colors.primary, modifier = Modifier.size(22.dp))
+            Box(Modifier.size(40.dp).background(c.card, CircleShape).border(1.dp, c.border, CircleShape), Alignment.Center) {
+                Icon(Icons.Rounded.Person, null, tint = c.primary, modifier = Modifier.size(22.dp))
             }
         }
-
-        Spacer(Modifier.height(18.dp))
-
-        // Camera CTA Card
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(160.dp)
-                .clip(RoundedCornerShape(24.dp))
-                .background(
-                    Brush.linearGradient(
-                        colors = listOf(
-                            colors.card,
-                            colors.primary.copy(alpha = 0.08f)
-                        )
-                    )
-                )
-                .border(
-                    1.dp,
-                    Brush.linearGradient(
-                        colors = listOf(colors.primary.copy(alpha = 0.6f), colors.cardBorder)
-                    ),
-                    RoundedCornerShape(24.dp)
-                )
-                .clickable(onClick = onScanClick),
-            contentAlignment = Alignment.Center
+        Spacer(Modifier.height(16.dp))
+        Box(Modifier.fillMaxWidth().height(156.dp).clip(RoundedCornerShape(22.dp))
+            .background(Brush.linearGradient(listOf(c.card, c.primary.copy(0.07f))))
+            .border(1.dp, Brush.linearGradient(listOf(c.primary.copy(0.55f), c.border)), RoundedCornerShape(22.dp))
+            .clickable(onClick = onScanClick), Alignment.Center
         ) {
-            // Radial glow behind icon
-            Box(
-                modifier = Modifier
-                    .size(180.dp)
-                    .background(
-                        Brush.radialGradient(
-                            colors = listOf(colors.primary.copy(alpha = 0.08f), Color.Transparent)
-                        ),
-                        CircleShape
-                    )
-            )
-            // Scanning ring
-            ScanningRing(color = colors.primary)
-
+            Box(Modifier.size(160.dp).background(Brush.radialGradient(listOf(c.primary.copy(0.07f), Color.Transparent)), CircleShape))
+            ScanningRing(color = c.primary)
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(
-                    modifier = Modifier
-                        .size(56.dp)
-                        .background(colors.primary.copy(alpha = 0.15f), CircleShape)
-                        .border(2.dp, colors.primary.copy(alpha = 0.5f), CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.CameraAlt,
-                        contentDescription = "Open camera",
-                        tint = colors.primary,
-                        modifier = Modifier.size(28.dp)
-                    )
+                Box(Modifier.size(52.dp).background(c.primary.copy(0.14f), CircleShape).border(2.dp, c.primary.copy(0.45f), CircleShape), Alignment.Center) {
+                    Icon(Icons.Rounded.CameraAlt, "Open camera", tint = c.primary, modifier = Modifier.size(26.dp))
                 }
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    text       = "Point your camera at anything",
-                    style      = MaterialTheme.typography.titleMedium,
-                    color      = colors.onSurface,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    text  = "detect objects, read text, translate & more",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.subtext
-                )
+                Spacer(Modifier.height(8.dp))
+                Text("Point your camera at anything", style = MaterialTheme.typography.titleMedium, color = c.onSurface, fontWeight = FontWeight.SemiBold)
+                Text("detect · read text · translate & more", style = MaterialTheme.typography.bodySmall, color = c.subtext)
             }
-
-            // Quick mode chips
-            Row(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 14.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
+            Row(Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                 listOf("Search", "Translate", "Homework", "QR").forEach { mode ->
-                    Box(
-                        modifier = Modifier
-                            .background(colors.background.copy(alpha = 0.7f), CircleShape)
-                            .border(1.dp, colors.cardBorder, CircleShape)
-                            .padding(horizontal = 12.dp, vertical = 5.dp)
-                    ) {
-                        Text(mode, style = MaterialTheme.typography.labelLarge, color = colors.subtext)
+                    Box(Modifier.background(c.background.copy(0.7f), CircleShape).border(1.dp, c.border, CircleShape).padding(horizontal = 11.dp, vertical = 4.dp)) {
+                        Text(mode, style = MaterialTheme.typography.labelLarge, color = c.subtext)
                     }
                 }
             }

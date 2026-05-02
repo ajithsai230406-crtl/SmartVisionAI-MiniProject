@@ -8,7 +8,6 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.*
 import androidx.compose.material.icons.Icons
@@ -18,321 +17,162 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.draw.*
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.platform.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.concurrent.futures.await
-import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.google.accompanist.permissions.*
-import com.smartvision.ai.ui.screens.camera.CameraIconButton
 import com.smartvision.ai.domain.models.*
 import com.smartvision.ai.ui.screens.camera.CameraIconButton
 import com.smartvision.ai.ui.theme.*
 import kotlinx.coroutines.launch
+import java.util.concurrent.Executors
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
-fun QrScannerScreen(
-    onBack:    () -> Unit,
-    viewModel: QrScannerViewModel = hiltViewModel()
-) {
-    val permission = rememberPermissionState(Manifest.permission.CAMERA)
-    LaunchedEffect(Unit) {
-        if (!permission.status.isGranted) permission.launchPermissionRequest()
-    }
+fun QrScannerScreen(onBack: () -> Unit, vm: QrScannerViewModel = hiltViewModel()) {
+    val perm = rememberPermissionState(Manifest.permission.CAMERA)
+    LaunchedEffect(Unit) { if (!perm.status.isGranted) perm.launchPermissionRequest() }
+    if (!perm.status.isGranted) return
 
-    if (permission.status.isGranted) {
-        QrCameraContent(onBack = onBack, viewModel = viewModel)
-    }
-}
-
-@Composable
-private fun QrCameraContent(
-    onBack:    () -> Unit,
-    viewModel: QrScannerViewModel
-) {
-    val colors         = smartColors
-    val uiState by    viewModel.uiState.collectAsState()
-    val context       = LocalContext.current
-    val scope         = rememberCoroutineScope()
+    val c = svColors
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     val lifecycleOwner = LocalLifecycleOwner.current
-    val accent        = SmartVisionColors.qrScanner
+    val s by vm.uiState.collectAsState()
+    val accent = SVColors.orange
 
-    // Auto-open URL when detected
-    LaunchedEffect(uiState.result) {
-        val res = uiState.result
-        if (res is ScanResult.QrCodeResult && res.type == QrType.URL && uiState.autoOpen) {
+    // Auto-open URL in system browser
+    LaunchedEffect(s.result) {
+        val r = s.result
+        if (r is ScanResult.QrCodeResult && r.type == QrType.URL && s.autoOpen) {
             try {
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(res.rawValue))
-                context.startActivity(intent)
-                viewModel.setAutoOpen(false) // prevent re-opening
-            } catch (e: Exception) { /* invalid URL */ }
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(r.rawValue))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                ctx.startActivity(intent)
+            } catch (_: Exception) { }
         }
     }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-
-        // ── Camera Preview ────────────────────────────────────────────────────
         AndroidView(
             modifier = Modifier.fillMaxSize(),
-            factory  = { ctx ->
-                val previewView = PreviewView(ctx).apply {
-                    implementationMode = PreviewView.ImplementationMode.COMPATIBLE
-                    scaleType          = PreviewView.ScaleType.FILL_CENTER
-                }
-                scope.launch {
-                    val provider = ProcessCameraProvider.getInstance(ctx).await()
-                    val preview  = Preview.Builder().build().apply {
-                        setSurfaceProvider(previewView.surfaceProvider)
+            factory = { context ->
+                PreviewView(context).apply {
+                    scope.launch {
+                        val provider = ProcessCameraProvider.getInstance(context).get()
+                        val preview = Preview.Builder().build().also { it.setSurfaceProvider(surfaceProvider) }
+                        val analyzer = ImageAnalysis.Builder()
+                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST).build()
+                            .also { it.setAnalyzer(Executors.newSingleThreadExecutor()) { proxy -> vm.analyze(proxy) } }
+                        try {
+                            provider.unbindAll()
+                            provider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analyzer)
+                        } catch (e: Exception) { e.printStackTrace() }
                     }
-                    val analyzer = ImageAnalysis.Builder()
-                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                        .build().apply {
-                            setAnalyzer(ContextCompat.getMainExecutor(ctx)) { proxy ->
-                                viewModel.analyze(proxy)
-                            }
-                        }
-                    try {
-                        provider.unbindAll()
-                        provider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analyzer)
-                    } catch (e: Exception) { e.printStackTrace() }
                 }
-                previewView
             }
         )
 
-        // ── Gradients ─────────────────────────────────────────────────────────
-        Box(
-            Modifier.fillMaxWidth().height(140.dp).align(Alignment.TopCenter)
-                .background(Brush.verticalGradient(listOf(Color.Black.copy(0.8f), Color.Transparent)))
-        )
-        Box(
-            Modifier.fillMaxWidth().height(200.dp).align(Alignment.BottomCenter)
-                .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(0.9f))))
-        )
+        // Gradients
+        Box(Modifier.fillMaxWidth().height(130.dp).align(Alignment.TopCenter)
+            .background(Brush.verticalGradient(listOf(Color.Black.copy(.8f), Color.Transparent))))
+        Box(Modifier.fillMaxWidth().height(220.dp).align(Alignment.BottomCenter)
+            .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(.9f)))))
 
-        // ── Top bar ───────────────────────────────────────────────────────────
-        Row(
-            modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment     = Alignment.CenterVertically
-        ) {
+        // Top bar
+        Row(Modifier.fillMaxWidth().statusBarsPadding().padding(16.dp),
+            Arrangement.SpaceBetween, Alignment.CenterVertically) {
             CameraIconButton(Icons.Rounded.Close, onClick = onBack)
             Text("QR Scanner", style = MaterialTheme.typography.titleMedium, color = Color.White, fontWeight = FontWeight.SemiBold)
-            CameraIconButton(
-                icon    = if (uiState.autoOpen) Icons.Rounded.LinkOff else Icons.Rounded.OpenInBrowser,
-                onClick = { viewModel.setAutoOpen(!uiState.autoOpen) }
-            )
+            CameraIconButton(if (s.autoOpen) Icons.Rounded.OpenInBrowser else Icons.Rounded.LinkOff,
+                onClick = { vm.setAutoOpen(!s.autoOpen) })
         }
 
-        // ── QR Viewfinder ─────────────────────────────────────────────────────
-        QrViewfinder(
-            isDetected  = uiState.result is ScanResult.QrCodeResult,
-            accent      = accent,
-            modifier    = Modifier.align(Alignment.Center).size(260.dp)
-        )
+        // Viewfinder
+        QrViewfinder(s.result != null, accent, Modifier.align(Alignment.Center).size(256.dp))
 
-        // ── Scan line animation ───────────────────────────────────────────────
-        if (uiState.result == null) {
-            ScanLine(accent = accent, modifier = Modifier.align(Alignment.Center).size(260.dp))
+        // Scan line animation
+        if (s.result == null) ScanLineAnimation(accent, Modifier.align(Alignment.Center).size(256.dp))
+
+        // Auto-open badge
+        if (s.autoOpen) Box(Modifier.align(Alignment.TopEnd).statusBarsPadding()
+            .padding(top = 62.dp, end = 16.dp)
+            .background(accent.copy(.2f), RoundedCornerShape(8.dp))
+            .border(1.dp, accent.copy(.4f), RoundedCornerShape(8.dp))
+            .padding(horizontal = 10.dp, vertical = 5.dp)) {
+            Text("Auto-open ON", style = MaterialTheme.typography.labelSmall, color = accent)
         }
 
-        // ── Result panel ──────────────────────────────────────────────────────
-        QrResultPanel(
-            result   = uiState.result,
-            autoOpen = uiState.autoOpen,
-            accent   = accent,
-            onOpenLink = { url ->
-                try {
-                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                } catch (e: Exception) {}
-            },
-            onCopy   = viewModel::copyResult,
-            onRescan = viewModel::rescan,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = 32.dp, start = 16.dp, end = 16.dp)
-        )
-
-        // Auto-open toggle label
-        if (uiState.autoOpen) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .statusBarsPadding()
-                    .padding(top = 64.dp, end = 16.dp)
-                    .background(accent.copy(0.2f), RoundedCornerShape(8.dp))
-                    .border(1.dp, accent.copy(0.4f), RoundedCornerShape(8.dp))
-                    .padding(horizontal = 10.dp, vertical = 5.dp)
-            ) {
-                Text("Auto-open ON", style = MaterialTheme.typography.labelSmall, color = accent)
-            }
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// QR VIEWFINDER
-// ─────────────────────────────────────────────────────────────────────────────
-
-@Composable
-private fun QrViewfinder(isDetected: Boolean, accent: Color, modifier: Modifier = Modifier) {
-    val color = if (isDetected) Color(0xFF00E676) else accent
-    val alpha by animateFloatAsState(if (isDetected) 1f else 0.7f, label = "qrAlpha")
-
-    Box(modifier = modifier) {
-        val cornerLen = 32.dp
-        val thickness = 3.dp
-        // Corners
-        listOf(
-            Alignment.TopStart    to Pair(true,  true),
-            Alignment.TopEnd      to Pair(true,  false),
-            Alignment.BottomStart to Pair(false, true),
-            Alignment.BottomEnd   to Pair(false, false)
-        ).forEach { (alignment, flags) ->
-            val (isTop, isLeft) = flags
-            Box(modifier = Modifier.align(alignment)) {
-                // Horizontal bar
-                Box(Modifier.width(cornerLen).height(thickness)
-                    .offset(x = if (!isLeft) (-cornerLen) else 0.dp, y = if (!isTop) (-thickness) else 0.dp)
-                    .background(color.copy(alpha), if (isLeft) RoundedCornerShape(topStart = 4.dp) else RoundedCornerShape(topEnd = 4.dp))
-                )
-                // Vertical bar
-                Box(Modifier.width(thickness).height(cornerLen)
-                    .offset(x = if (!isLeft) (-thickness) else 0.dp, y = if (!isTop) (-cornerLen) else 0.dp)
-                    .background(color.copy(alpha), if (isTop) RoundedCornerShape(topStart = 4.dp) else RoundedCornerShape(bottomStart = 4.dp))
-                )
-            }
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SCAN LINE
-// ─────────────────────────────────────────────────────────────────────────────
-
-@Composable
-private fun ScanLine(accent: Color, modifier: Modifier = Modifier) {
-    val inf = rememberInfiniteTransition(label = "scanLine")
-    val offset by inf.animateFloat(
-        initialValue  = 0f,
-        targetValue   = 1f,
-        animationSpec = infiniteRepeatable(tween(1800, easing = LinearEasing), RepeatMode.Reverse),
-        label         = "lineOffset"
-    )
-    Canvas(modifier = modifier) {
-        val y = size.height * offset
-        drawLine(
-            brush       = Brush.horizontalGradient(listOf(Color.Transparent, accent, Color.Transparent)),
-            start       = Offset(0f, y),
-            end         = Offset(size.width, y),
-            strokeWidth = 2.dp.toPx()
-        )
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// QR RESULT PANEL
-// ─────────────────────────────────────────────────────────────────────────────
-
-@Composable
-private fun QrResultPanel(
-    result:     ScanResult?,
-    autoOpen:   Boolean,
-    accent:     Color,
-    onOpenLink: (String) -> Unit,
-    onCopy:     () -> Unit,
-    onRescan:   () -> Unit,
-    modifier:   Modifier = Modifier
-) {
-    val colors = smartColors
-
-    if (result == null) {
-        // Scanning hint
-        Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                "Point at a QR code",
-                style     = MaterialTheme.typography.titleMedium,
-                color     = Color.White,
-                fontWeight = FontWeight.SemiBold,
-                textAlign = TextAlign.Center
-            )
-            Text(
-                "Supports URL, Text, WiFi, Email, Phone & more",
-                style     = MaterialTheme.typography.bodySmall,
-                color     = Color.White.copy(0.6f),
-                textAlign = TextAlign.Center
-            )
-        }
-        return
-    }
-
-    if (result is ScanResult.QrCodeResult) {
-        Column(
-            modifier = modifier
-                .clip(RoundedCornerShape(24.dp))
-                .background(colors.surface)
-                .border(1.dp, accent.copy(0.4f), RoundedCornerShape(24.dp))
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Box(
-                    Modifier.background(accent.copy(0.15f), RoundedCornerShape(10.dp)).padding(8.dp)
-                ) {
-                    Icon(Icons.Rounded.QrCodeScanner, null, tint = accent, modifier = Modifier.size(22.dp))
-                }
-                Column {
-                    Text(result.type.name, style = MaterialTheme.typography.labelLarge, color = accent, fontWeight = FontWeight.Bold)
-                    Text("QR Code detected", style = MaterialTheme.typography.bodySmall, color = colors.subtext)
-                }
-            }
-
-            Text(
-                result.displayValue,
-                style   = MaterialTheme.typography.bodyMedium,
-                color   = colors.onSurface,
-                maxLines = 3
-            )
-
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (result.type == QrType.URL) {
-                    Button(
-                        onClick  = { onOpenLink(result.rawValue) },
-                        modifier = Modifier.weight(1f),
-                        colors   = ButtonDefaults.buttonColors(containerColor = accent),
-                        shape    = RoundedCornerShape(14.dp)
-                    ) {
-                        Icon(Icons.Rounded.OpenInBrowser, null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Open Link", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelLarge)
+        // Result panel
+        Column(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 28.dp, start = 16.dp, end = 16.dp)) {
+            if (s.result == null) {
+                Text("Point at any QR code", style = MaterialTheme.typography.titleMedium,
+                    color = Color.White, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth())
+                Text("Supports URL, Text, WiFi, Email, Phone & more",
+                    style = MaterialTheme.typography.bodySmall, color = Color.White.copy(.6f),
+                    textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+            } else if (s.result is ScanResult.QrCodeResult) {
+                val qr = s.result as ScanResult.QrCodeResult
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp))
+                    .background(c.surface).border(1.dp, accent.copy(.4f), RoundedCornerShape(22.dp)).padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Box(Modifier.background(accent.copy(.15f), RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 4.dp)) {
+                        Text(qr.type.name, style = MaterialTheme.typography.labelLarge, color = accent, fontWeight = FontWeight.Bold)
+                    }
+                    Text(qr.displayValue, style = MaterialTheme.typography.bodyMedium, color = c.onSurface, maxLines = 3)
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        if (qr.type == QrType.URL) Button(onClick = {
+                            try { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(qr.rawValue)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                            catch (_: Exception) {}
+                        }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = accent),
+                            shape = RoundedCornerShape(12.dp)) {
+                            Icon(Icons.Rounded.OpenInBrowser, null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp)); Text("Open Link", fontWeight = FontWeight.Bold)
+                        }
+                        OutlinedButton(onClick = { vm.rescan() }, modifier = Modifier.weight(.5f),
+                            border = BorderStroke(1.dp, c.border), shape = RoundedCornerShape(12.dp)) {
+                            Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(16.dp))
+                        }
                     }
                 }
-                OutlinedButton(
-                    onClick = onCopy,
-                    modifier = Modifier.weight(if (result.type == QrType.URL) 0.7f else 1f),
-                    border  = BorderStroke(1.dp, colors.cardBorder),
-                    shape   = RoundedCornerShape(14.dp)
-                ) {
-                    Icon(Icons.Rounded.ContentCopy, null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Copy", style = MaterialTheme.typography.labelLarge)
-                }
-                OutlinedButton(
-                    onClick = onRescan,
-                    modifier = Modifier.weight(0.6f),
-                    border  = BorderStroke(1.dp, colors.cardBorder),
-                    shape   = RoundedCornerShape(14.dp)
-                ) {
-                    Icon(Icons.Rounded.Refresh, null, modifier = Modifier.size(16.dp))
-                }
             }
         }
+    }
+}
+
+@Composable
+private fun QrViewfinder(detected: Boolean, accent: Color, modifier: Modifier = Modifier) {
+    val color = if (detected) SVColors.green else accent
+    val inf = rememberInfiniteTransition(label = "q")
+    val a by inf.animateFloat(.6f, 1f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "a")
+    Box(modifier) {
+        val ck = 22.dp; val th = 3.dp
+        // Corners
+        listOf(Alignment.TopStart, Alignment.TopEnd, Alignment.BottomStart, Alignment.BottomEnd).forEachIndexed { i, align ->
+            Box(Modifier.align(align)) {
+                val isLeft = i % 2 == 0; val isTop = i < 2
+                Box(Modifier.width(ck).height(th).offset(x = if (!isLeft) -ck else 0.dp, y = if (!isTop) -th else 0.dp)
+                    .background(color.copy(a), CircleShape))
+                Box(Modifier.width(th).height(ck).offset(x = if (!isLeft) -th else 0.dp, y = if (!isTop) -ck else 0.dp)
+                    .background(color.copy(a), CircleShape))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ScanLineAnimation(accent: Color, modifier: Modifier = Modifier) {
+    val inf = rememberInfiniteTransition(label = "sl")
+    val offset by inf.animateFloat(0f, 1f, infiniteRepeatable(tween(1800, easing = LinearEasing), RepeatMode.Reverse), label = "o")
+    Canvas(modifier) {
+        val y = size.height * offset
+        drawLine(Brush.horizontalGradient(listOf(Color.Transparent, accent, Color.Transparent)),
+            start = Offset(0f, y),
+            end   = Offset(size.width, y), strokeWidth = 2f)
     }
 }
