@@ -34,6 +34,10 @@ data class TextBlock(val text: String, val boundingBox: BoundingBox)
 data class WasteCategory(val label: String, val confidence: Float, val color: Long)
 enum class QrType { URL, TEXT, EMAIL, PHONE, SMS, WIFI, CONTACT, OTHER }
 
+// ── Legacy models (for ResultRepository) ──────────────────────────────────────
+data class MedicineResult(val name: String, val category: String, val confidence: Float)
+data class WasteResult(val category: String, val confidence: Float)
+
 // ── Firestore model ───────────────────────────────────────────────────────────
 data class ScanHistoryItem(
     val id: String = "", val userId: String = "", val moduleType: String = "",
@@ -46,4 +50,11 @@ data class UserPreferences(
     val appTheme: String = "DARK", val defaultLanguage: String = "en",
     val enableTts: Boolean = true, val saveHistory: Boolean = true,
     val liveDetection: Boolean = false
+)
+
+// ── Onboarding ────────────────────────────────────────────────────────────────
+data class OnboardingPage(
+    val title: String,
+    val description: String,
+    val accentHex: Long
 )

@@ -1,77 +1,167 @@
 package com.smartvision.ai.ui.theme
 
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import android.app.Activity
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.sp
-import com.smartvision.ai.domain.models.ModuleType
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 
-enum class AppTheme { DARK, LIGHT, BLUE }
+// ─── Dark Neon Color Scheme ───────────────────────────────────────────────────
+private val DarkColorScheme = darkColorScheme(
+    primary             = NeonBlue,
+    onPrimary           = DeepNavy,
+    primaryContainer    = NavyCard,
+    onPrimaryContainer  = TextPrimary,
 
-object SVColors {
-    val darkBg = Color(0xFF080C14); val darkSurface = Color(0xFF0E1420)
-    val darkCard = Color(0xFF141B2D); val darkBorder = Color(0xFF1E2A42)
-    val darkPrimary = Color(0xFF00E5FF); val darkSecondary = Color(0xFF7C4DFF)
-    val darkText = Color(0xFFE8EAF6); val darkSub = Color(0xFF8892B0)
-    val lightBg = Color(0xFFF4F6FC); val lightSurface = Color(0xFFFFFFFF)
-    val lightCard = Color(0xFFFFFFFF); val lightBorder = Color(0xFFE8ECF5)
-    val lightPrimary = Color(0xFF0070FF); val lightText = Color(0xFF0D1B2A); val lightSub = Color(0xFF6B7280)
-    val blueBg = Color(0xFF040D1E); val blueSurface = Color(0xFF071428)
-    val blueCard = Color(0xFF0A1D36); val blueBorder = Color(0xFF1A3A6B)
-    val bluePrimary = Color(0xFF4FC3F7); val blueText = Color(0xFFE3F2FD); val blueSub = Color(0xFF90CAF9)
-    val cyan = Color(0xFF00E5FF); val purple = Color(0xFFAA00FF); val amber = Color(0xFFFFAB00)
-    val green = Color(0xFF00E676); val blue = Color(0xFF2979FF); val red = Color(0xFFFF1744)
-    val green2 = Color(0xFF00C853); val orange = Color(0xFFFF6D00); val error = Color(0xFFFF5252)
-}
+    secondary           = NeonPurple,
+    onSecondary         = DeepNavy,
+    secondaryContainer  = NavyCardDark,
+    onSecondaryContainer= TextPrimary,
 
-fun moduleAccent(module: ModuleType): Color = when (module) {
-    ModuleType.OBJECT_DETECTION -> SVColors.cyan
-    ModuleType.TEXT_SCANNER     -> SVColors.purple
-    ModuleType.TRANSLATOR       -> SVColors.amber
-    ModuleType.VOICE_TRANSLATOR -> SVColors.green
-    ModuleType.STUDENT_HELPER   -> SVColors.blue
-    ModuleType.MEDICAL_SCANNER  -> SVColors.red
-    ModuleType.WASTE_CLASSIFIER -> SVColors.green2
-    ModuleType.QR_SCANNER       -> SVColors.orange
-}
+    tertiary            = NeonCyan,
+    onTertiary          = DeepNavy,
+    tertiaryContainer   = Color(0xFF0D1F3C),
+    onTertiaryContainer = TextPrimary,
 
-data class SVColorScheme(
-    val background: Color, val surface: Color, val card: Color, val border: Color,
-    val primary: Color, val secondary: Color, val onSurface: Color, val subtext: Color,
-    val error: Color = SVColors.error, val isLight: Boolean = false
+    background          = DeepNavy,
+    onBackground        = TextPrimary,
+    surface             = NavyCard,
+    onSurface           = TextPrimary,
+    surfaceVariant      = GlassCard,
+    onSurfaceVariant    = TextSecondary,
+
+    outline             = GlassBorder,
+    outlineVariant      = DividerDark,
+
+    error               = NeonPink,
+    onError             = DeepNavy,
+    errorContainer      = Color(0x44FF2D78),
+    onErrorContainer    = NeonPink,
+
+    inverseSurface      = TextPrimary,
+    inverseOnSurface    = DeepNavy,
+    inversePrimary      = NeonBlueDim
 )
 
-val LocalSVColors = staticCompositionLocalOf {
-    SVColorScheme(SVColors.darkBg, SVColors.darkSurface, SVColors.darkCard, SVColors.darkBorder,
-        SVColors.darkPrimary, SVColors.darkSecondary, SVColors.darkText, SVColors.darkSub)
-}
+// ─── Light Color Scheme ───────────────────────────────────────────────────────
+private val LightColorScheme = lightColorScheme(
+    primary             = LightNeonBlue,
+    onPrimary           = LightSurface,
+    primaryContainer    = LightCard,
+    onPrimaryContainer  = LightTextPrimary,
 
-val svTypography = Typography(
-    displaySmall  = TextStyle(fontWeight = FontWeight.Bold,     fontSize = 24.sp),
-    headlineLarge = TextStyle(fontWeight = FontWeight.SemiBold, fontSize = 22.sp),
-    headlineSmall = TextStyle(fontWeight = FontWeight.SemiBold, fontSize = 18.sp),
-    titleLarge    = TextStyle(fontWeight = FontWeight.SemiBold, fontSize = 16.sp),
-    titleMedium   = TextStyle(fontWeight = FontWeight.Medium,   fontSize = 14.sp),
-    bodyMedium    = TextStyle(fontWeight = FontWeight.Normal,   fontSize = 12.sp),
-    bodySmall     = TextStyle(fontWeight = FontWeight.Normal,   fontSize = 11.sp),
-    labelLarge    = TextStyle(fontWeight = FontWeight.Medium,   fontSize = 12.sp),
-    labelSmall    = TextStyle(fontWeight = FontWeight.Medium,   fontSize = 10.sp),
+    secondary           = LightNeonPurple,
+    onSecondary         = LightSurface,
+    secondaryContainer  = LightCard,
+    onSecondaryContainer= LightTextPrimary,
+
+    tertiary            = LightNeonBlue,
+    onTertiary          = LightSurface,
+    tertiaryContainer   = LightCard,
+    onTertiaryContainer = LightTextPrimary,
+
+    background          = LightBackground,
+    onBackground        = LightTextPrimary,
+    surface             = LightSurface,
+    onSurface           = LightTextPrimary,
+    surfaceVariant      = LightCard,
+    onSurfaceVariant    = LightTextSecondary,
+
+    outline             = LightCardBorder,
+    outlineVariant      = LightDivider,
+
+    error               = NeonPink,
+    onError             = LightSurface,
+    errorContainer      = Color(0xFFFFE5EE),
+    onErrorContainer    = Color(0xFFAA0040),
+
+    inverseSurface      = LightTextPrimary,
+    inverseOnSurface    = LightSurface,
+    inversePrimary      = LightNeonBlue
 )
+
+// ─── Extended colors (neon accents not in M3 spec) ───────────────────────────
+data class ExtendedColors(
+    val neonBlue: Color,
+    val neonPurple: Color,
+    val neonCyan: Color,
+    val neonGreen: Color,
+    val neonPink: Color,
+    val neonOrange: Color,
+    val neonYellow: Color,
+    val glassCard: Color,
+    val glassBorder: Color,
+    val cardBackground: Color,
+    val textHint: Color,
+    val isDark: Boolean
+)
+
+val LocalExtendedColors = staticCompositionLocalOf {
+    ExtendedColors(
+        neonBlue      = NeonBlue,
+        neonPurple    = NeonPurple,
+        neonCyan      = NeonCyan,
+        neonGreen     = NeonGreen,
+        neonPink      = NeonPink,
+        neonOrange    = NeonOrange,
+        neonYellow    = AccentQR,
+        glassCard     = GlassCard,
+        glassBorder   = GlassBorder,
+        cardBackground= NavyCard,
+        textHint      = TextHint,
+        isDark        = true
+    )
+}
 
 @Composable
-fun SmartVisionTheme(appTheme: AppTheme = AppTheme.DARK, content: @Composable () -> Unit) {
-    val s = when (appTheme) {
-        AppTheme.DARK  -> SVColorScheme(SVColors.darkBg, SVColors.darkSurface, SVColors.darkCard, SVColors.darkBorder, SVColors.darkPrimary, SVColors.darkSecondary, SVColors.darkText, SVColors.darkSub)
-        AppTheme.LIGHT -> SVColorScheme(SVColors.lightBg, SVColors.lightSurface, SVColors.lightCard, SVColors.lightBorder, SVColors.lightPrimary, Color(0xFF6200EE), SVColors.lightText, SVColors.lightSub, isLight = true)
-        AppTheme.BLUE  -> SVColorScheme(SVColors.blueBg, SVColors.blueSurface, SVColors.blueCard, SVColors.blueBorder, SVColors.bluePrimary, Color(0xFF40C4FF), SVColors.blueText, SVColors.blueSub)
+fun SmartVisionTheme(
+    darkTheme: Boolean = true,
+    content: @Composable () -> Unit
+) {
+    val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
+
+    val extendedColors = ExtendedColors(
+        neonBlue      = if (darkTheme) NeonBlue      else LightNeonBlue,
+        neonPurple    = if (darkTheme) NeonPurple    else LightNeonPurple,
+        neonCyan      = if (darkTheme) NeonCyan      else LightNeonBlue,
+        neonGreen     = NeonGreen,
+        neonPink      = NeonPink,
+        neonOrange    = NeonOrange,
+        neonYellow    = AccentQR,
+        glassCard     = if (darkTheme) GlassCard     else LightGlassCard,
+        glassBorder   = if (darkTheme) GlassBorder   else LightGlassBorder,
+        cardBackground= if (darkTheme) NavyCard      else LightCard,
+        textHint      = if (darkTheme) TextHint      else LightTextHint,
+        isDark        = darkTheme
+    )
+
+    // Status bar styling — transparent edge-to-edge
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as Activity).window
+            window.statusBarColor = android.graphics.Color.TRANSPARENT
+            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+        }
     }
-    val m3 = if (s.isLight) lightColorScheme(primary = s.primary, background = s.background, surface = s.surface, onBackground = s.onSurface, onSurface = s.onSurface)
-    else darkColorScheme(primary = s.primary, background = s.background, surface = s.surface, onBackground = s.onSurface, onSurface = s.onSurface)
-    CompositionLocalProvider(LocalSVColors provides s) {
-        MaterialTheme(colorScheme = m3, typography = svTypography, content = content)
+
+    CompositionLocalProvider(LocalExtendedColors provides extendedColors) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography  = SmartVisionTypography,
+            content     = content
+        )
     }
 }
 
-val svColors: SVColorScheme @Composable get() = LocalSVColors.current
+// Convenience accessor
+val MaterialTheme.extended: ExtendedColors
+    @Composable get() = LocalExtendedColors.current

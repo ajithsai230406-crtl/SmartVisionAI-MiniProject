@@ -7,10 +7,6 @@ import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ALL USE CASE BINDINGS
-// ─────────────────────────────────────────────────────────────────────────────
-
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class UseCaseModule {
@@ -32,4 +28,10 @@ abstract class UseCaseModule {
 
     @Binds @Singleton
     abstract fun bindMedicalScan(impl: MedicalScanUseCaseImpl): MedicalScanUseCase
+
+    @Binds @Singleton
+    abstract fun bindResultRepository(impl: ResultRepositoryImpl): ResultRepository
+
+    // HistoryRepository is a class with @Inject constructor, so it doesn't need a @Binds method.
+    // The previous bindHistoryRepository(impl: HistoryRepositoryImpl) was failing because HistoryRepositoryImpl didn't exist.
 }

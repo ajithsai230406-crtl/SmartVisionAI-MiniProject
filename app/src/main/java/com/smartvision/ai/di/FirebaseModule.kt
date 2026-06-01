@@ -16,7 +16,22 @@ object FirebaseModule {
     fun provideFirebaseAuth(): FirebaseAuth = FirebaseAuth.getInstance()
 
     @Provides @Singleton
-    fun provideFirestore(): FirebaseFirestore = FirebaseFirestore.getInstance()
+    fun provideFirestore(): FirebaseFirestore {
+        val firestore = FirebaseFirestore.getInstance()
+        try {
+            val settings = com.google.firebase.firestore.FirebaseFirestoreSettings.Builder()
+                .setLocalCacheSettings(
+                    com.google.firebase.firestore.PersistentCacheSettings.newBuilder()
+                        .setSizeBytes(15 * 1024 * 1024) // 15MB local disk cache limit to prevent storage bloat
+                        .build()
+                )
+                .build()
+            firestore.firestoreSettings = settings
+        } catch (_: Exception) {
+            // Safe fallback if settings are already initialized or configured
+        }
+        return firestore
+    }
 
     @Provides @Singleton
     fun provideStorage(): FirebaseStorage = FirebaseStorage.getInstance()

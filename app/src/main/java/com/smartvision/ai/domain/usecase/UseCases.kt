@@ -1,29 +1,28 @@
 package com.smartvision.ai.domain.usecase
 
 import android.graphics.Bitmap
-import android.net.Uri
 import com.smartvision.ai.domain.models.*
+import javax.inject.Inject
 
-interface DetectObjectsUseCase { suspend operator fun invoke(bitmap: Bitmap): ScanResult }
-interface OcrUseCase {
-    suspend operator fun invoke(bitmap: Bitmap): ScanResult
-    suspend fun extractFromArea(bitmap: Bitmap, area: android.graphics.Rect): ScanResult
-}
-interface ClassifyWasteUseCase  { suspend operator fun invoke(bitmap: Bitmap): ScanResult }
-interface ScanQrUseCase         { suspend operator fun invoke(bitmap: Bitmap): ScanResult }
-interface StudentHelperUseCase  {
-    suspend operator fun invoke(questionBitmap: Bitmap): ScanResult
-    suspend fun explainText(text: String): ScanResult
-}
-interface MedicalScanUseCase    { suspend operator fun invoke(bitmap: Bitmap): ScanResult }
+// ── Validation (our addition — no interface conflict) ─────────────────────────
 
-interface ResultRepository {
-    suspend fun cacheResult(result: ScanResult)
-    suspend fun getCachedResult(): ScanResult?
-    suspend fun cacheImagePath(path: String)
-    suspend fun getCachedImagePath(): String?
-    suspend fun cacheUri(uri: Uri)
-    suspend fun saveToHistory(item: ScanHistoryItem): Result<Unit>
-    suspend fun getHistory(userId: String): Result<List<ScanHistoryItem>>
-    suspend fun deleteHistory(itemId: String): Result<Unit>
+class ValidateInputUseCase @Inject constructor() {
+    fun validateEmail(email: String): ValidationResult {
+        if (email.isBlank()) return ValidationResult(false, "Email cannot be empty")
+        if (!android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches())
+            return ValidationResult(false, "Enter a valid email address")
+        return ValidationResult(true)
+    }
+    fun validatePassword(password: String): ValidationResult {
+        if (password.isBlank()) return ValidationResult(false, "Password cannot be empty")
+        if (password.length < 6) return ValidationResult(false, "Password must be at least 6 characters")
+        return ValidationResult(true)
+    }
+    fun validateText(text: String, label: String = "Text"): ValidationResult {
+        if (text.isBlank()) return ValidationResult(false, "$label cannot be empty")
+        if (text.length > 5000) return ValidationResult(false, "$label is too long")
+        return ValidationResult(true)
+    }
 }
+
+data class ValidationResult(val isValid: Boolean, val error: String = "")

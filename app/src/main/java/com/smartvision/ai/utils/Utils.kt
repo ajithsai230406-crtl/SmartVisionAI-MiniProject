@@ -23,74 +23,74 @@ class TtsManager @Inject constructor(
     private var tts: TextToSpeech? = null
     private var isReady = false
 
-    private val _speaking = MutableStateFlow(false)
-    val speaking: StateFlow<Boolean> = _speaking.asStateFlow()
-
     init {
         tts = TextToSpeech(context) { status ->
-            isReady = status == TextToSpeech.SUCCESS
-            if (isReady) tts?.language = Locale.ENGLISH
+            isReady = (status == TextToSpeech.SUCCESS)
+            tts?.language = Locale.getDefault()
         }
     }
 
-    /**
-     * Speaks [text] in [languageCode] (BCP-47, e.g. "en", "hi", "fr").
-     * Returns after speech finishes (suspends).
-     */
-    suspend fun speak(text: String, languageCode: String = "en"): Boolean {
-        if (!isReady || tts == null) return false
-        val locale = Locale.forLanguageTag(languageCode)
-        val result = tts!!.setLanguage(locale)
-        if (result == TextToSpeech.LANG_MISSING_DATA ||
-            result == TextToSpeech.LANG_NOT_SUPPORTED) {
-            tts!!.language = Locale.ENGLISH // fallback
-        }
-        val id = UUID.randomUUID().toString()
-        return suspendCancellableCoroutine { cont ->
-            tts!!.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                override fun onStart(utteranceId: String?)  { _speaking.value = true  }
-                override fun onDone(utteranceId: String?)   { _speaking.value = false; cont.resume(true) }
-                override fun onError(utteranceId: String?)  { _speaking.value = false; cont.resume(false) }
+    fun speak(text: String, locale: Locale = Locale.getDefault()) {
+        if (!isReady || text.isBlank()) return
+        tts?.language = locale
+        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, UUID.randomUUID().toString())
+    }
+
+    fun stop()     { tts?.stop() }
+    fun isSpeaking() = tts?.isSpeaking == true
+
+    /** Suspends until speech completes or coroutine is cancelled */
+    suspend fun speakAndWait(text: String, locale: Locale = Locale.getDefault()) =
+        suspendCancellableCoroutine { cont ->
+            if (!isReady || text.isBlank()) { cont.resume(Unit); return@suspendCancellableCoroutine }
+            val id = UUID.randomUUID().toString()
+            tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?)  {}
+                override fun onDone(utteranceId: String?)   { if (utteranceId == id) cont.resume(Unit) }
+                override fun onError(utteranceId: String?)  { if (utteranceId == id) cont.resume(Unit) }
             })
-            tts!!.speak(text, TextToSpeech.QUEUE_FLUSH, null, id)
+            tts?.language = locale
+            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, id)
+            cont.invokeOnCancellation { tts?.stop() }
         }
+
+    fun setLocale(locale: Locale) {
+        if (isReady) tts?.language = locale
     }
 
-    /** Immediately stops any ongoing speech. */
-    fun stop() {
-        tts?.stop()
-        _speaking.value = false
-    }
-
-    fun shutdown() {
-        tts?.shutdown()
-        tts = null
-    }
+    fun shutdown() { tts?.shutdown(); tts = null; isReady = false }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EXTENSIONS
+// LOCALE HELPER
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Formats confidence float (0.0–1.0) as a percentage string, e.g. "87%" */
-fun Float.toConfidenceString(): String = "${(this * 100).toInt()}%"
-
-/** Returns a human-readable label for a QR type */
-fun com.smartvision.ai.domain.models.QrType.displayLabel(): String = when (this) {
-    com.smartvision.ai.domain.models.QrType.URL     -> "Web Link"
-    com.smartvision.ai.domain.models.QrType.TEXT    -> "Plain Text"
-    com.smartvision.ai.domain.models.QrType.EMAIL   -> "Email Address"
-    com.smartvision.ai.domain.models.QrType.PHONE   -> "Phone Number"
-    com.smartvision.ai.domain.models.QrType.SMS     -> "SMS Message"
-    com.smartvision.ai.domain.models.QrType.WIFI    -> "Wi-Fi Network"
-    com.smartvision.ai.domain.models.QrType.CONTACT -> "Contact Card"
-    com.smartvision.ai.domain.models.QrType.OTHER   -> "Other"
+fun langCodeToLocale(code: String): Locale = when (code) {
+    "hi" -> Locale("hi", "IN")
+    "te" -> Locale("te", "IN")
+    "ta" -> Locale("ta", "IN")
+    "bn" -> Locale("bn", "IN")
+    "mr" -> Locale("mr", "IN")
+    "gu" -> Locale("gu", "IN")
+    "ur" -> Locale("ur", "PK")
+    "fr" -> Locale.FRENCH
+    "de" -> Locale.GERMAN
+    "ja" -> Locale.JAPANESE
+    "zh" -> Locale.CHINESE
+    "ko" -> Locale.KOREAN
+    "es" -> Locale("es", "ES")
+    "ar" -> Locale("ar")
+    "pt" -> Locale("pt", "PT")
+    "ru" -> Locale("ru", "RU")
+    "it" -> Locale.ITALIAN
+    else -> Locale.ENGLISH
 }
 
-/** Truncates text with ellipsis for history summaries */
-fun String.toHistorySummary(maxLen: Int = 80): String =
-    if (length <= maxLen) this else take(maxLen - 1) + "…"
+// ─────────────────────────────────────────────────────────────────────────────
+// DATE HELPERS (duplicate-safe, prefer util/Extensions.kt)
+// ─────────────────────────────────────────────────────────────────────────────
 
-/** Returns true if a URL string is valid */
-fun String.isValidUrl(): Boolean =
-    startsWith("http://") || startsWith("https://")
+fun formatTimestamp(millis: Long): String {
+    val sdf = java.text.SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault())
+    return sdf.format(java.util.Date(millis))
+}

@@ -11,6 +11,14 @@ import javax.inject.Singleton
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore("sv_prefs")
 
+data class UserPreferences(
+    val appTheme: String,
+    val enableTts: Boolean,
+    val saveHistory: Boolean,
+    val liveDetection: Boolean,
+    val defaultLanguage: String
+)
+
 @Singleton
 class UserPreferencesRepository @Inject constructor(
     @ApplicationContext private val context: Context
@@ -23,13 +31,25 @@ class UserPreferencesRepository @Inject constructor(
         val LANG     = stringPreferencesKey("default_lang")
     }
 
+    val allPrefsFlow: Flow<UserPreferences> = context.dataStore.data
+        .catch { emit(emptyPreferences()) }
+        .map { prefs ->
+            UserPreferences(
+                appTheme = prefs[Keys.THEME] ?: "DARK",
+                enableTts = prefs[Keys.TTS] ?: true,
+                saveHistory = prefs[Keys.HISTORY] ?: true,
+                liveDetection = prefs[Keys.LIVE] ?: false,
+                defaultLanguage = prefs[Keys.LANG] ?: "en"
+            )
+        }
+
     val appThemeFlow:    Flow<String>  = context.dataStore.data.catch { emit(emptyPreferences()) }.map { it[Keys.THEME]   ?: "DARK" }
     val ttsEnabledFlow:  Flow<Boolean> = context.dataStore.data.catch { emit(emptyPreferences()) }.map { it[Keys.TTS]     ?: true }
     val saveHistoryFlow: Flow<Boolean> = context.dataStore.data.catch { emit(emptyPreferences()) }.map { it[Keys.HISTORY] ?: true }
     val liveDetFlow:     Flow<Boolean> = context.dataStore.data.catch { emit(emptyPreferences()) }.map { it[Keys.LIVE]    ?: false }
 
     suspend fun setAppTheme(v: String)  { context.dataStore.edit { it[Keys.THEME]   = v } }
-    suspend fun setTts(v: Boolean)      { context.dataStore.edit { it[Keys.TTS]     = v } }
+    suspend fun setTtsEnabled(v: Boolean) { context.dataStore.edit { it[Keys.TTS]     = v } }
     suspend fun setSaveHistory(v: Boolean) { context.dataStore.edit { it[Keys.HISTORY] = v } }
     suspend fun setLiveDetection(v: Boolean) { context.dataStore.edit { it[Keys.LIVE]  = v } }
 }

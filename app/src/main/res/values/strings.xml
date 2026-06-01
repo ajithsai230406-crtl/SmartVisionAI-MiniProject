@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">SmartVision AI</string>
-    <color name="splash_bg">#080C14</color>
+    <string name="app_name">Smart Vision AI</string>
+    <string name="tagline">See Smarter with AI</string>
+    <string name="firebase_setup_note">Replace app/google-services.json with your Firebase console file for live Google login.</string>
+    <string name="default_web_client_id">your_web_client_id_here</string>
 </resources>
