@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/nav_graph"
+    app:startDestination="@id/splashFragment">
+
+    <fragment
+        android:id="@+id/splashFragment"
+        android:name="com.smartvision.ai.presentation.splash.SplashFragment"
+        android:label="Splash">
+        <action
+            android:id="@+id/action_splashFragment_to_loginFragment"
+            app:destination="@id/loginFragment" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/onboardingFragment"
+        android:name="com.smartvision.ai.presentation.onboarding.OnboardingFragment"
+        android:label="Onboarding" />
+
+    <fragment
+        android:id="@+id/loginFragment"
+        android:name="com.smartvision.ai.presentation.auth.LoginFragment"
+        android:label="Login">
+        <action
+            android:id="@+id/action_loginFragment_to_homeFragment"
+            app:destination="@id/homeFragment" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/signupFragment"
+        android:name="com.smartvision.ai.presentation.auth.SignupFragment"
+        android:label="Signup" />
+
+    <fragment
+        android:id="@+id/homeFragment"
+        android:name="com.smartvision.ai.presentation.home.HomeFragment"
+        android:label="Home" />
+
+    <fragment
+        android:id="@+id/ocrScannerFragment"
+        android:name="com.smartvision.ai.ui.ocr.OcrScannerFragment"
+        android:label="OCR Scanner">
+        <action
+            android:id="@+id/action_ocrScannerFragment_to_ocrResultFragment"
+            app:destination="@id/ocrResultFragment" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/ocrResultFragment"
+        android:name="com.smartvision.ai.ui.ocr.OcrResultFragment"
+        android:label="OCR Result">
+        <argument
+            android:name="extractedText"
+            android:defaultValue="@null"
+            app:argType="string"
+            app:nullable="true" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/objectDetectionFragment"
+        android:name="com.smartvision.ai.ui.objectdetection.ObjectDetectionFragment"
+        android:label="Object Detection" />
+
+    <fragment
+        android:id="@+id/translationFragment"
+        android:name="com.smartvision.ai.presentation.translation.TranslationFragment"
+        android:label="Translator" />
+
+    <fragment
+        android:id="@+id/voiceAssistantFragment"
+        android:name="com.smartvision.ai.presentation.voice.VoiceAssistantFragment"
+        android:label="Voice Assistant" />
+
+    <fragment
+        android:id="@+id/medicineDetectionFragment"
+        android:name="com.smartvision.ai.presentation.vision.MedicineDetectionFragment"
+        android:label="Medicine Scanner" />
+
+    <fragment
+        android:id="@+id/wasteClassificationFragment"
+        android:name="com.smartvision.ai.presentation.vision.WasteClassificationFragment"
+        android:label="Waste Classifier" />
+
+    <fragment
+        android:id="@+id/aiChatFragment"
+        android:name="com.smartvision.ai.presentation.chat.AiChatFragment"
+        android:label="AI Chat" />
+
+    <fragment
+        android:id="@+id/historyFragment"
+        android:name="com.smartvision.ai.presentation.history.HistoryFragment"
+        android:label="History" />
+
+    <fragment
+        android:id="@+id/settingsFragment"
+        android:name="com.smartvision.ai.presentation.settings.SettingsFragment"
+        android:label="Settings" />
+
+    <fragment
+        android:id="@+id/profileFragment"
+        android:name="com.smartvision.ai.presentation.profile.ProfileFragment"
+        android:label="Profile" />
+
+    <fragment
+        android:id="@+id/aboutProjectFragment"
+        android:name="com.smartvision.ai.presentation.about.AboutProjectFragment"
+        android:label="About" />
+
+    <fragment
+        android:id="@+id/cameraPermissionFragment"
+        android:name="com.smartvision.ai.presentation.permission.CameraPermissionFragment"
+        android:label="Camera Permission" />
+
+    <fragment
+        android:id="@+id/loadingFragment"
+        android:name="com.smartvision.ai.presentation.state.LoadingFragment"
+        android:label="Loading" />
+
+    <fragment
+        android:id="@+id/successFragment"
+        android:name="com.smartvision.ai.presentation.state.SuccessFragment"
+        android:label="Success" />
+
+    <fragment
+        android:id="@+id/errorFragment"
+        android:name="com.smartvision.ai.presentation.state.ErrorFragment"
+        android:label="Error" />
+</navigation>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Widget.SmartVision.BottomNav" />
+
+    <style name="Widget.SmartVision.BottomNav.Active">
+        <item name="android:color">@color/card_deep</item>
+        <item name="android:width">58dp</item>
+        <item name="android:height">34dp</item>
+    </style>
+</resources>

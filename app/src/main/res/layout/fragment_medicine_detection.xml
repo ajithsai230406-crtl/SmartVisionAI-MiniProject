@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_app_gradient">
+
+    <androidx.camera.view.PreviewView
+        android:id="@+id/previewView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <com.smartvision.ai.ui.DetectionOverlayView
+        android:id="@+id/overlayView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <TextView
+        style="@style/TextAppearance.SmartVision.Title"
+        android:layout_width="match_parent"
+        android:layout_height="72dp"
+        android:background="#D9050915"
+        android:gravity="center"
+        android:text="Medicine Scanner" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:background="#E6050915"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:id="@+id/resultText"
+            style="@style/TextAppearance.SmartVision.Title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_glass_card"
+            android:text="Align a medicine strip or bottle for AI identification."
+            android:textSize="18sp" />
+
+        <TextView
+            android:id="@+id/detailText"
+            style="@style/TextAppearance.SmartVision.Body"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="The demo classifier provides safe, educational information and warning notes." />
+
+        <Button
+            android:id="@+id/captureButton"
+            android:layout_width="match_parent"
+            android:layout_height="54dp"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/bg_gradient_button"
+            android:text="Analyze Medicine"
+            android:textColor="@color/white" />
+    </LinearLayout>
+</FrameLayout>

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_app_gradient">
+    <com.smartvision.ai.ui.ParticleBackgroundView android:layout_width="match_parent" android:layout_height="match_parent" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center" android:orientation="vertical" android:padding="28dp">
+        <TextView android:layout_width="136dp" android:layout_height="136dp" android:background="@drawable/bg_error_circle" android:gravity="center" android:text="!" android:textColor="@color/error_neon" android:textSize="52sp" android:textStyle="bold" />
+        <TextView style="@style/TextAppearance.SmartVision.Title" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="22dp" android:gravity="center" android:text="Something went wrong" />
+        <Button android:id="@+id/retryButton" android:layout_width="match_parent" android:layout_height="54dp" android:layout_marginTop="24dp" android:background="@drawable/bg_gradient_button" android:text="Retry" android:textColor="@color/white" />
+    </LinearLayout>
+</FrameLayout>

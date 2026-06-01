@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_app_gradient">
+
+    <com.smartvision.ai.ui.ParticleBackgroundView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <androidx.core.widget.NestedScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:clipToPadding="false"
+        android:paddingBottom="104dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="20dp">
+
+            <TextView
+                android:id="@+id/greetingText"
+                style="@style/TextAppearance.SmartVision.Headline"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:text="Hello Ajith"
+                android:textSize="28sp" />
+
+            <TextView
+                style="@style/TextAppearance.SmartVision.Body"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="What can I help you scan today?" />
+
+            <EditText
+                android:id="@+id/searchInput"
+                android:layout_width="match_parent"
+                android:layout_height="54dp"
+                android:layout_marginTop="18dp"
+                android:background="@drawable/bg_input"
+                android:drawableStart="@drawable/ic_chat"
+                android:drawablePadding="10dp"
+                android:hint="Ask Smart Vision AI..."
+                android:textColor="@color/white"
+                android:textColorHint="@color/muted_text" />
+
+            <com.smartvision.ai.ui.AnalyticsView
+                android:id="@+id/analyticsView"
+                android:layout_width="match_parent"
+                android:layout_height="128dp"
+                android:layout_marginTop="18dp"
+                android:background="@drawable/bg_glass_card" />
+
+            <TextView
+                style="@style/TextAppearance.SmartVision.Title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:text="AI Tools"
+                android:textSize="20sp" />
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/featureRecycler"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:nestedScrollingEnabled="false" />
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
+</FrameLayout>

@@ -1,0 +1,74 @@
+[
+  {
+    "phrase": "hi",
+    "meaningEnglish": "A friendly and informal greeting used to say hello.",
+    "meaningOriginal": "नमस्ते एक सम्मानजनक और दोस्ताना अभिवादन शब्द है।",
+    "contextExplanation": "Widely used in daily informal conversations to initiate friendly dialogue.",
+    "usageExplanation": "Say 'Hi' when meeting friends or acquaintances. Example: 'Hi, how are you today?'",
+    "pronunciation": "Namas-te"
+  },
+  {
+    "phrase": "hello",
+    "meaningEnglish": "A standard and polite greeting used to say hello.",
+    "meaningOriginal": "नमस्ते एक मानक और शिष्ट अभिवादन शब्द है।",
+    "contextExplanation": "Suitable for both formal and informal introductions.",
+    "usageExplanation": "Used globally to greet anyone. Example: 'Hello, welcome to Smart Vision!'",
+    "pronunciation": "Namas-te"
+  },
+  {
+    "phrase": "thank you",
+    "meaningEnglish": "An expression of gratitude and appreciation.",
+    "meaningOriginal": "धन्यवाद आभार और कृतज्ञता प्रकट करने का एक शिष्ट शब्द है।",
+    "contextExplanation": "A crucial conversational pillar to show appreciation for help or gifts.",
+    "usageExplanation": "Used when receiving assistance, a favor, or a compliment. Example: 'Thank you for your help.'",
+    "pronunciation": "Dhan-ya-vaad"
+  },
+  {
+    "phrase": "please",
+    "meaningEnglish": "A polite word used to make requests or ask for favors.",
+    "meaningOriginal": "कृपया विनम्रतापूर्वक अनुरोध या सहायता मांगने का एक शिष्ट शब्द है।",
+    "contextExplanation": "Adds politeness and soft intent to imperative demands.",
+    "usageExplanation": "Add 'please' at the beginning or end of requests. Example: 'Please open the door.'",
+    "pronunciation": "Krip-ya"
+  },
+  {
+    "phrase": "goodbye",
+    "meaningEnglish": "A parting phrase used when taking leave or separating.",
+    "meaningOriginal": "अलविदा विदा लेते समय या अलग होते समय बोला जाने वाला एक पारंपरिक शब्द है।",
+    "contextExplanation": "Standard valediction marking the conclusion of a conversation.",
+    "usageExplanation": "Said when ending a visit or meeting. Example: 'Goodbye, see you tomorrow!'",
+    "pronunciation": "Al-vida"
+  },
+  {
+    "phrase": "welcome",
+    "meaningEnglish": "A friendly greeting or response to thank you.",
+    "meaningOriginal": "स्वागत है किसी का शिष्टता से स्वागत करने या धन्यवाद का उत्तर देने का शब्द।",
+    "contextExplanation": "Hospitality indicator or standard politeness loop.",
+    "usageExplanation": "Said when welcoming guests or responding to thanks. Example: 'Welcome, make yourself at home!'",
+    "pronunciation": "Swaa-gat hai"
+  },
+  {
+    "phrase": "how are you",
+    "meaningEnglish": "An inquiry into someone's well-being and health.",
+    "meaningOriginal": "आप कैसे हैं किसी के स्वास्थ्य और कल्याण के बारे में शिष्टता से पूछना।",
+    "contextExplanation": "Standard social icebreaker utilized after greetings.",
+    "usageExplanation": "Ask to show care or keep conversations flowing. Example: 'How are you today?'",
+    "pronunciation": "Aap kaise hain"
+  },
+  {
+    "phrase": "where is the hospital",
+    "meaningEnglish": "An urgent medical inquiry seeking location guidance.",
+    "meaningOriginal": "अस्पताल कहाँ है आपातकालीन चिकित्सा दिशा-निर्देश या स्थान पूछना।",
+    "contextExplanation": "Critical travel or medical phrase used in emergencies.",
+    "usageExplanation": "Used to ask bystanders for the nearest clinic. Example: 'Excuse me, where is the hospital?'",
+    "pronunciation": "As-pa-taal kahaan hai"
+  },
+  {
+    "phrase": "solve the equation",
+    "meaningEnglish": "An educational request asking to resolve mathematical parameters.",
+    "meaningOriginal": "समीकरण को हल करें गणितीय मानों या चरणों को सुलझाने का अनुरोध।",
+    "contextExplanation": "Common math, homework, or classroom instruction standard.",
+    "usageExplanation": "Used in study guides, viva questions, or tutor chat requests. Example: 'Solve the equation for X.'",
+    "pronunciation": "Sa-mee-ka-ran ko hal karein"
+  }
+]

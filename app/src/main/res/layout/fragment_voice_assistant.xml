@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_app_gradient">
+
+    <com.smartvision.ai.ui.ParticleBackgroundView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <TextView
+            style="@style/TextAppearance.SmartVision.Headline"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:text="Voice Assistant"
+            android:textSize="28sp" />
+
+        <com.smartvision.ai.ui.NeonOrbView
+            android:id="@+id/orbView"
+            android:layout_width="220dp"
+            android:layout_height="220dp"
+            android:layout_marginTop="42dp" />
+
+        <TextView
+            android:id="@+id/listeningText"
+            style="@style/TextAppearance.SmartVision.Title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:gravity="center"
+            android:text="Tap the orb and speak" />
+
+        <com.smartvision.ai.ui.WaveformView
+            android:id="@+id/waveformView"
+            android:layout_width="match_parent"
+            android:layout_height="96dp"
+            android:layout_marginTop="20dp" />
+
+        <TextView
+            android:id="@+id/transcriptText"
+            style="@style/TextAppearance.SmartVision.Body"
+            android:layout_width="match_parent"
+            android:layout_height="96dp"
+            android:layout_marginTop="18dp"
+            android:background="@drawable/bg_glass_card"
+            android:gravity="center"
+            android:text="Try: Open OCR, translate text, open medicine detector, open waste classifier." />
+    </LinearLayout>
+</FrameLayout>

@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_app_gradient">
+
+    <com.smartvision.ai.ui.ParticleBackgroundView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="22dp">
+
+            <TextView
+                style="@style/TextAppearance.SmartVision.Headline"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:text="About Project"
+                android:textSize="28sp" />
+
+            <TextView
+                style="@style/TextAppearance.SmartVision.Body"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:background="@drawable/bg_glass_card"
+                android:lineSpacingExtra="4dp"
+                android:text="Smart Vision AI is a Kotlin + XML Android mini project using MVVM, CameraX, ML Kit OCR/Translate, SpeechRecognizer, TextToSpeech, Room, DataStore, Firebase Auth hooks and TensorFlow Lite integration. It demonstrates assistive AI for OCR, translation, voice commands, medicine awareness, waste classification and chat-style guidance." />
+
+            <TextView
+                style="@style/TextAppearance.SmartVision.Title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                android:text="Future Scope" />
+
+            <TextView
+                style="@style/TextAppearance.SmartVision.Body"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/bg_glass_card"
+                android:lineSpacingExtra="4dp"
+                android:text="Cloud AI inference, custom trained medicine and waste models, offline model packs, wearable support, accessibility-first reading modes and multilingual school/healthcare deployments." />
+        </LinearLayout>
+    </ScrollView>
+</FrameLayout>
