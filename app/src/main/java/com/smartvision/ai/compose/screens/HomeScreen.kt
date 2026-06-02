@@ -18,10 +18,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.smartvision.ai.compose.components.*
 import com.smartvision.ai.compose.navigation.Routes
 import com.smartvision.ai.presentation.history.HistoryViewModel
+import com.smartvision.ai.presentation.auth.AuthViewModel
+import com.smartvision.ai.compose.screens.getPresetEmoji
 import com.smartvision.ai.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
+import coil.compose.AsyncImage
+import androidx.compose.ui.layout.ContentScale
 
 // ── 9 modules only — AI Assistant is the floating orb, NOT a card ─────────────
 private data class QuickModule(
@@ -43,22 +47,52 @@ private val modules = listOf(
     QuickModule("Medicine\nScanner", "💊", AccentMedicine, Routes.MEDICINE_SCANNER)
 )
 
-private fun greetingText(): String {
+private data class DynamicGreeting(
+    val title: String,
+    val subtitle: String,
+    val bgGradients: List<Color>,
+    val glowColor: Color
+)
+
+private fun getDynamicGreeting(name: String): DynamicGreeting {
     val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
     return when {
-        hour < 12 -> "Good morning!"
-        hour < 17 -> "Good afternoon!"
-        else      -> "Good evening!"
+        hour in 5..11 -> DynamicGreeting(
+            title = "Good Morning, $name 👋",
+            subtitle = "Start your day with smart vision",
+            bgGradients = listOf(Color(0xFFFF9E80), Color(0xFFFFD54F)),
+            glowColor = Color(0xFFFFD54F)
+        )
+        hour in 12..16 -> DynamicGreeting(
+            title = "Good Afternoon, $name 👋",
+            subtitle = "Stay productive and search smart",
+            bgGradients = listOf(Color(0xFF80D8FF), Color(0xFF29B6F6)),
+            glowColor = Color(0xFF80D8FF)
+        )
+        hour in 17..20 -> DynamicGreeting(
+            title = "Good Evening, $name 👋",
+            subtitle = "Wind down and explore history",
+            bgGradients = listOf(Color(0xFFFF8A80), Color(0xFFEA80FC)),
+            glowColor = Color(0xFFEA80FC)
+        )
+        else -> DynamicGreeting(
+            title = "Good Night, $name 👋",
+            subtitle = "Secure scans & sleep tight",
+            bgGradients = listOf(Color(0xFF311B92), Color(0xFF0D47A1)),
+            glowColor = Color(0xFF311B92)
+        )
     }
 }
 
 @Composable
 fun HomeScreen(
     onNavigate: (String) -> Unit,
-    historyViewModel: HistoryViewModel = hiltViewModel()
+    historyViewModel: HistoryViewModel = hiltViewModel(),
+    authViewModel: AuthViewModel = hiltViewModel()
 ) {
     val ext          = MaterialTheme.extended
     val historyItems by historyViewModel.history.collectAsStateWithLifecycle()
+    val profile      by authViewModel.profile.collectAsStateWithLifecycle()
     var searchQuery  by remember { mutableStateOf("") }
 
     val infiniteTransition = rememberInfiniteTransition(label = "homeBg")
@@ -104,6 +138,22 @@ fun HomeScreen(
         ) {
             // ── Greeting Header ───────────────────────────────────────────
             item {
+                val firstName = remember(profile.name) {
+                    profile.name.split(" ").firstOrNull() ?: "User"
+                }
+                val greeting = remember(firstName) { getDynamicGreeting(firstName) }
+                
+                val infiniteGlow = rememberInfiniteTransition(label = "greetingGlow")
+                val glowAlpha by infiniteGlow.animateFloat(
+                    initialValue = 0.4f,
+                    targetValue = 0.8f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(2000, easing = EaseInOutQuad),
+                        repeatMode = RepeatMode.Reverse
+                    ),
+                    label = "alpha"
+                )
+
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -112,36 +162,93 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment     = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Text(
-                            "Hi, Arjun 👋",
-                            style      = MaterialTheme.typography.headlineSmall,
-                            color      = MaterialTheme.colorScheme.onBackground,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            greetingText(),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    // Avatar
                     Box(
                         modifier = Modifier
-                            .size(48.dp)
+                            .weight(1f)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(ext.glassCard)
+                            .border(
+                                1.dp,
+                                Brush.linearGradient(
+                                    listOf(
+                                        greeting.glowColor.copy(alpha = glowAlpha),
+                                        Color.White.copy(0.1f)
+                                    )
+                                ),
+                                RoundedCornerShape(20.dp)
+                            )
+                            .padding(16.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        Brush.linearGradient(greeting.bgGradients)
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                val timeIcon = when {
+                                    greeting.title.contains("Morning") -> "🌅"
+                                    greeting.title.contains("Afternoon") -> "☀️"
+                                    greeting.title.contains("Evening") -> "🌇"
+                                    else -> "🌙"
+                                }
+                                Text(timeIcon, fontSize = 22.sp)
+                            }
+
+                            Column {
+                                Text(
+                                    text = greeting.title,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = greeting.subtitle,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.width(12.dp))
+
+                    Box(
+                        modifier = Modifier
+                            .size(54.dp)
                             .clip(CircleShape)
                             .background(
                                 Brush.radialGradient(listOf(NeonBlue.copy(0.6f), NeonPurple))
                             )
-                            .border(2.dp, NeonBlue.copy(0.6f), CircleShape),
+                            .border(2.dp, NeonBlue.copy(0.6f), CircleShape)
+                            .clickable { onNavigate(Routes.PROFILE) },
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            "A",
-                            color      = Color.White,
-                            style      = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.ExtraBold
-                        )
+                        val presetEmoji = remember(profile.photoUrl) { getPresetEmoji(profile.photoUrl) }
+                        if (presetEmoji.isNotEmpty()) {
+                            Text(presetEmoji, fontSize = 26.sp)
+                        } else if (!profile.photoUrl.isNullOrEmpty()) {
+                            AsyncImage(
+                                model = profile.photoUrl,
+                                contentDescription = "Profile Photo",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            val initials = (profile.name.firstOrNull() ?: 'U').toString().uppercase()
+                            Text(
+                                initials,
+                                color      = Color.White,
+                                style      = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
                     }
                 }
             }
@@ -304,15 +411,6 @@ fun HomeScreen(
             }
         }
 
-        // ── Floating AI Assistant Orb — bottom-right, above nav bar ──────
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(bottom = 90.dp, end = 20.dp)
-                .navigationBarsPadding()
-        ) {
-            FloatingAiOrb(onClick = { onNavigate(Routes.AI_ASSISTANT) })
-        }
     }
 }
 

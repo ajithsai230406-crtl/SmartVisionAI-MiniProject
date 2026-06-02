@@ -30,13 +30,22 @@ class AiChatViewModel @Inject constructor(
     var isLoading by mutableStateOf(false)
         private set
 
+    var isStreaming by mutableStateOf(false)
+        private set
+
+    private var lastQuery: String? = null
+    private var lastContextRoute: String? = null
+
     /**
      * Sends the user question, builds a memory transcript window of the last 8 messages,
      * and streams the online Gemini AI reply, updating the text content in-place dynamically.
      */
     fun send(text: String, contextRoute: String? = null) {
         val query = text.trim()
-        if (query.isBlank() || isLoading) return
+        if (query.isBlank() || isLoading || isStreaming) return
+        
+        lastQuery = query
+        lastContextRoute = contextRoute
         
         val currentHistory = _messages.value
         _messages.value = currentHistory + ChatMessage(query, true)
@@ -59,9 +68,11 @@ class AiChatViewModel @Inject constructor(
                     historyTranscript = historyTranscript,
                     contextRoute      = contextRoute
                 ).collect { chunk ->
-                    // Turn off loading typing indicator dots as soon as the first stream chunk arrives!
+                    // Turn off loading typing indicator dots as soon as the first stream chunk arrives,
+                    // but mark active streaming as true to keep the inputs disabled.
                     if (isLoading) {
                         isLoading = false
+                        isStreaming = true
                     }
                     streamedReply += chunk
                     
@@ -73,18 +84,25 @@ class AiChatViewModel @Inject constructor(
                     }
                 }
                 
-                // Final loading reset
+                // Final streaming reset
+                isStreaming = false
                 isLoading = false
                 
                 // Save conversation to global local history database
                 historyRepository.save("Chat", query.take(32), streamedReply.take(220))
             } catch (e: Exception) {
                 isLoading = false
+                isStreaming = false
                 // Remove the empty placeholder if it failed before starting, and append the error bubble
                 val cleanList = _messages.value.filter { it.text.isNotEmpty() }
-                _messages.value = cleanList + ChatMessage("⚠️ Error: ${e.message ?: "Failed to generate dynamic streaming reply"}", false)
+                _messages.value = cleanList + ChatMessage("⚠️ Error: ${e.message ?: "Failed to generate dynamic streaming reply"}. Tap the top bar to try again or retry your message.", false)
             }
         }
+    }
+
+    fun retryLastMessage() {
+        val query = lastQuery ?: return
+        send(query, lastContextRoute)
     }
 
     fun clearChat() {
@@ -92,5 +110,8 @@ class AiChatViewModel @Inject constructor(
             ChatMessage("Chat cleared! I'm here contextually. Ask me anything about this screen or other features.", false)
         )
         isLoading = false
+        isStreaming = false
+        lastQuery = null
+        lastContextRoute = null
     }
 }

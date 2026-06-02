@@ -64,8 +64,8 @@ fun GlobalFloatingAiAssistant(
 ) {
     val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
     
-    // Do NOT render the global assistant floating orb during onboarding, login, or splash screens
-    if (currentRoute == "splash" || currentRoute == "login" || currentRoute == "onboarding") {
+    // Do NOT render the global assistant floating orb during onboarding, login, splash, or fullscreen AI assistant screens
+    if (currentRoute == "splash" || currentRoute == "login" || currentRoute == "onboarding" || currentRoute == "ai_assistant") {
         return
     }
 
@@ -84,7 +84,8 @@ fun GlobalFloatingAiAssistant(
     var isListening by remember { mutableStateOf(false) }
     var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
 
-    LaunchedEffect(messages.size) {
+    val lastMessageText = remember { derivedStateOf { messages.lastOrNull()?.text ?: "" } }
+    LaunchedEffect(messages.size, lastMessageText.value) {
         if (messages.isNotEmpty() && isExpanded) {
             chatListState.animateScrollToItem(messages.lastIndex)
         }
@@ -448,7 +449,7 @@ fun GlobalFloatingAiAssistant(
                 // Chat Input mic text row
                 InputVoiceRowItem(
                     input = input,
-                    isLoading = viewModel.isLoading,
+                    isLoading = viewModel.isLoading || viewModel.isStreaming,
                     isListening = isListening,
                     hasMicPermission = micPermission.status.isGranted,
                     onVoiceToggle = {
@@ -496,7 +497,7 @@ fun GlobalFloatingAiAssistant(
                     },
                     onChange = { input = it },
                     onSend = {
-                        if (input.isNotBlank() && !viewModel.isLoading) {
+                        if (input.isNotBlank() && !(viewModel.isLoading || viewModel.isStreaming)) {
                             viewModel.send(input.trim(), contextRoute = currentRoute)
                             input = ""
                         }

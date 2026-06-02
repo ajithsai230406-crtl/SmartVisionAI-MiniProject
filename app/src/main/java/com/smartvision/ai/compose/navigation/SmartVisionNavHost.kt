@@ -24,6 +24,8 @@ import com.smartvision.ai.translator.ui.VoiceTranslatorScreen as VoiceTranslator
 import com.smartvision.ai.docscanner.ui.DocumentScannerScreen
 import com.smartvision.ai.medicine.ui.MedicineScannerScreen as PremiumMedicineScannerScreen
 import com.smartvision.ai.ui.theme.*
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.smartvision.ai.presentation.auth.AuthViewModel
 
 @Composable
 fun SmartVisionNavHost(
@@ -32,6 +34,9 @@ fun SmartVisionNavHost(
 ) {
     val navController  = rememberNavController()
     val currentRoute   = navController.currentBackStackEntryAsState().value?.destination?.route
+    val authViewModel: AuthViewModel = hiltViewModel()
+    val isLoggedIn by authViewModel.isLoggedIn.collectAsState(initial = null)
+    val onboardingCompleted by authViewModel.onboardingCompleted.collectAsState(initial = null)
 
     // Routes that show the bottom nav bar
     val bottomNavRoutes = setOf(
@@ -89,7 +94,12 @@ fun SmartVisionNavHost(
                 composable(Routes.SPLASH) {
                     SplashScreen(
                         onFinished = {
-                            navController.navigate(Routes.ONBOARDING) {
+                            val target = when {
+                                isLoggedIn == true -> Routes.HOME
+                                onboardingCompleted == true -> Routes.LOGIN
+                                else -> Routes.ONBOARDING
+                            }
+                            navController.navigate(target) {
                                 popUpTo(Routes.SPLASH) { inclusive = true }
                             }
                         }
@@ -100,10 +110,12 @@ fun SmartVisionNavHost(
                 composable(Routes.ONBOARDING) {
                     OnboardingScreen(
                         onFinished = {
+                            authViewModel.setOnboardingCompleted(true)
                             navController.navigate(Routes.LOGIN) {
                                 popUpTo(Routes.ONBOARDING) { inclusive = true }
                             }
-                        }
+                        },
+                        onNavigate = { route -> navController.navigate(route) }
                     )
                 }
 
@@ -114,7 +126,8 @@ fun SmartVisionNavHost(
                             navController.navigate(Routes.HOME) {
                                 popUpTo(Routes.LOGIN) { inclusive = true }
                             }
-                        }
+                        },
+                        onNavigate = { route -> navController.navigate(route) }
                     )
                 }
 
@@ -191,7 +204,10 @@ fun SmartVisionNavHost(
 
                 // ── NEW Object Detector ──────────────────────────────────────
                 composable(Routes.OBJECT_DETECTOR_V2) {
-                    ObjectDetectorScreenV2(onBack = { navController.popBackStack() })
+                    ObjectDetectorScreenV2(
+                        onBack     = { navController.popBackStack() },
+                        onNavigate = { route -> navController.navigate(route) }
+                    )
                 }
                 composable(Routes.DETECTION_HISTORY) {
                     DetectionHistoryScreen(onBack = { navController.popBackStack() })
@@ -237,18 +253,46 @@ fun SmartVisionNavHost(
                     SettingsScreen(
                         onBack        = { navController.popBackStack() },
                         isDarkTheme   = isDarkTheme,
-                        onThemeToggle = onThemeToggle
+                        onThemeToggle = onThemeToggle,
+                        onNavigate    = { route -> navController.navigate(route) }
                     )
+                }
+
+                // ── Privacy Policy ───────────────────────────────────────────
+                composable(Routes.PRIVACY_POLICY) {
+                    PrivacyPolicyScreen(onBack = { navController.popBackStack() })
+                }
+
+                // ── Terms & Conditions ───────────────────────────────────────
+                composable(Routes.TERMS_CONDITIONS) {
+                    TermsConditionsScreen(onBack = { navController.popBackStack() })
                 }
 
                 // ── Profile ──────────────────────────────────────────────────
                 composable(Routes.PROFILE) {
-                    ProfileScreen(onBack = { navController.popBackStack() })
+                    ProfileScreen(
+                        onBack = { navController.popBackStack() },
+                        onNavigate = { route -> navController.navigate(route) },
+                        onLogout = {
+                            authViewModel.logout {
+                                navController.navigate(Routes.LOGIN) {
+                                    popUpTo(Routes.HOME) { inclusive = true }
+                                }
+                            }
+                        }
+                    )
                 }
 
                 // ── About ────────────────────────────────────────────────────
                 composable(Routes.ABOUT) {
                     AboutScreen(onBack = { navController.popBackStack() })
+                }
+
+                // ── Accessibility Settings ──────────────────────────────────
+                composable(Routes.ACCESSIBILITY) {
+                    AccessibilitySettingsScreen(
+                        onBack = { navController.popBackStack() }
+                    )
                 }
             }
         }

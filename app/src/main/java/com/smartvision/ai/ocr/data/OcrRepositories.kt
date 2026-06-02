@@ -27,6 +27,12 @@ class OcrRecognitionRepository @Inject constructor() {
         recognizer.process(input).await()
     }
 
+    /** Recognizes text from a Bitmap. */
+    suspend fun recognizeFromBitmap(bitmap: android.graphics.Bitmap): Result<Text> = runCatching {
+        val input = InputImage.fromBitmap(bitmap, 0)
+        recognizer.process(input).await()
+    }
+
     /** Recognizes text from a gallery URI. */
     suspend fun recognizeFromUri(context: Context, uri: Uri): Result<Text> = runCatching {
         val input = InputImage.fromFilePath(context, uri)

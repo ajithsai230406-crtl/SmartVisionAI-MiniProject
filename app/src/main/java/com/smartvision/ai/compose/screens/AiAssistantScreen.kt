@@ -57,8 +57,12 @@ fun AiAssistantScreen(
     var input     by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
 
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
+    // Smoothly scroll to bottom whenever message count changes or the last message's content streams new text
+    val lastMessageText = remember { derivedStateOf { messages.lastOrNull()?.text ?: "" } }
+    LaunchedEffect(messages.size, lastMessageText.value) {
+        if (messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.lastIndex)
+        }
     }
 
     GradientBackground {
@@ -85,14 +89,15 @@ fun AiAssistantScreen(
             }
 
             // ── AI Orb header ──────────────────────────────────────────────────
-            AiOrbHeader(isProcessing = viewModel.isLoading)
+            // Pulse and spin the orb while the AI is thinking (loading) or streaming!
+            AiOrbHeader(isProcessing = viewModel.isLoading || viewModel.isStreaming)
 
             // ── Messages + suggestions ─────────────────────────────────────────
             LazyColumn(
                 state           = listState,
                 modifier        = Modifier.weight(1f).padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                contentPadding  = PaddingValues(vertical = 8.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding  = PaddingValues(vertical = 12.dp)
             ) {
                 // Empty state
                 if (messages.isEmpty()) {
@@ -115,7 +120,7 @@ fun AiAssistantScreen(
                     AiChatBubble(text = msg.text, isUser = msg.fromUser)
                 }
 
-                // Loading indicator
+                // Loading indicator (active while model is thinking before first chunk)
                 if (viewModel.isLoading) {
                     item { AiTypingIndicator() }
                 }
@@ -124,10 +129,10 @@ fun AiAssistantScreen(
             // ── Input row ──────────────────────────────────────────────────────
             AiInputRow(
                 input     = input,
-                isLoading = viewModel.isLoading,
+                isLoading = viewModel.isLoading || viewModel.isStreaming,
                 onChange  = { input = it },
                 onSend    = {
-                    if (input.isNotBlank() && !viewModel.isLoading) {
+                    if (input.isNotBlank() && !(viewModel.isLoading || viewModel.isStreaming)) {
                         viewModel.send(input.trim())
                         input = ""
                     }
@@ -195,24 +200,64 @@ fun AiOrbHeader(isProcessing: Boolean = false) {
 @Composable
 private fun AiChatBubble(text: String, isUser: Boolean) {
     val ext = MaterialTheme.extended
+    val isError = text.startsWith("⚠️ Error")
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
     ) {
         if (!isUser) {
-            Box(Modifier.size(28.dp).clip(CircleShape).background(Brush.radialGradient(listOf(NeonPurple.copy(0.5f), NeonBlue.copy(0.3f)))).align(Alignment.Bottom)) {
-                Text("🤖", fontSize = 13.sp, modifier = Modifier.align(Alignment.Center))
+            // Futuristic assistant avatar with linear neon border
+            Box(
+                Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(Brush.radialGradient(listOf(NeonPurple.copy(0.3f), NeonCyan.copy(0.1f))))
+                    .border(1.dp, Brush.linearGradient(listOf(NeonCyan, NeonPurple)), CircleShape)
+                    .align(Alignment.Bottom),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("🤖", fontSize = 14.sp)
             }
-            Spacer(Modifier.width(6.dp))
+            Spacer(Modifier.width(8.dp))
         }
+
+        // Custom premium coloring and linear neon gradient borders
+        val bubbleBackground = when {
+            isUser -> Brush.linearGradient(listOf(NeonPurple, NeonBlue))
+            isError -> Brush.linearGradient(listOf(NeonPink.copy(0.12f), NeonPink.copy(0.04f)))
+            else -> Brush.linearGradient(listOf(ext.glassCard, ext.glassCard))
+        }
+
+        val bubbleBorderModifier = when {
+            isUser -> Modifier
+            isError -> Modifier.border(1.dp, NeonPink.copy(0.5f), RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 4.dp, bottomEnd = 18.dp))
+            else -> Modifier.border(
+                1.dp, 
+                Brush.linearGradient(listOf(NeonCyan.copy(0.4f), NeonPurple.copy(0.4f))), 
+                RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 4.dp, bottomEnd = 18.dp)
+            )
+        }
+
+        val bubbleTextColor = when {
+            isUser -> Color.White
+            isError -> NeonPink
+            else -> MaterialTheme.colorScheme.onSurface
+        }
+
         Box(
-            modifier = Modifier.widthIn(max = 280.dp)
+            modifier = Modifier.widthIn(max = 285.dp)
                 .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = if (isUser) 18.dp else 4.dp, bottomEnd = if (isUser) 4.dp else 18.dp))
-                .background(if (isUser) Brush.linearGradient(listOf(NeonPurple, NeonBlue)) else Brush.linearGradient(listOf(ext.glassCard, ext.glassCard)))
-                .then(if (!isUser) Modifier.border(1.dp, ext.glassBorder, RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 4.dp, bottomEnd = 18.dp)) else Modifier)
-                .padding(horizontal = 14.dp, vertical = 10.dp)
+                .background(bubbleBackground)
+                .then(bubbleBorderModifier)
+                .padding(horizontal = 14.dp, vertical = 11.dp)
         ) {
-            Text(text, style = MaterialTheme.typography.bodyMedium, color = if (isUser) Color.White else MaterialTheme.colorScheme.onSurface, lineHeight = 22.sp)
+            Text(
+                text = text, 
+                style = MaterialTheme.typography.bodyMedium, 
+                color = bubbleTextColor, 
+                lineHeight = 22.sp
+            )
         }
     }
 }
@@ -228,11 +273,25 @@ private fun AiTypingIndicator() {
         inf.animateFloat(0.3f, 1f, infiniteRepeatable(tween(500, delayMillis = i * 170), RepeatMode.Reverse), label = "d$i")
     }
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
-        Box(Modifier.size(28.dp).clip(CircleShape).background(Brush.radialGradient(listOf(NeonPurple.copy(0.5f), NeonBlue.copy(0.3f)))).align(Alignment.Bottom)) {
-            Text("🤖", fontSize = 13.sp, modifier = Modifier.align(Alignment.Center))
+        Box(
+            Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .background(Brush.radialGradient(listOf(NeonPurple.copy(0.3f), NeonCyan.copy(0.1f))))
+                .border(1.dp, Brush.linearGradient(listOf(NeonCyan, NeonPurple)), CircleShape)
+                .align(Alignment.Bottom),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("🤖", fontSize = 14.sp)
         }
-        Spacer(Modifier.width(6.dp))
-        Box(Modifier.clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomEnd = 18.dp)).background(MaterialTheme.extended.glassCard).border(1.dp, MaterialTheme.extended.glassBorder, RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomEnd = 18.dp)).padding(horizontal = 14.dp, vertical = 12.dp)) {
+        Spacer(Modifier.width(8.dp))
+        Box(
+            Modifier
+                .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomEnd = 18.dp))
+                .background(MaterialTheme.extended.glassCard)
+                .border(1.dp, Brush.linearGradient(listOf(NeonCyan.copy(0.3f), NeonPurple.copy(0.3f))), RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomEnd = 18.dp))
+                .padding(horizontal = 14.dp, vertical = 12.dp)
+        ) {
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                 dots.forEach { dot ->
                     Box(Modifier.size(7.dp).alpha(dot.value).clip(CircleShape).background(NeonBlue))

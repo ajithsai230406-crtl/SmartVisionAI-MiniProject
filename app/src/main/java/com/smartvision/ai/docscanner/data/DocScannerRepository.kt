@@ -69,12 +69,17 @@ class DocScannerRepository @Inject constructor() {
             scaled.recycle()
         }
 
-        val stream = openOutputStream(context, "$name.pdf", "application/pdf", "Documents")
-        pdfDoc.writeTo(stream)
-        pdfDoc.close()
-        stream.flush(); stream.close()
+        val folder = "Documents/SmartVisionAI"
+        val (uri, stream) = createFileUriAndStream(context, "$name.pdf", "application/pdf", folder)
+        try {
+            pdfDoc.writeTo(stream)
+            stream.flush()
+        } finally {
+            pdfDoc.close()
+            stream.close()
+        }
 
-        return getUriForName(context, "$name.pdf", "application/pdf", "Documents")
+        return uri
     }
 
     // ── Image export ───────────────────────────────────────────────────────────
@@ -86,50 +91,56 @@ class DocScannerRepository @Inject constructor() {
         val compFmt  = if (format == ExportFormat.PNG) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG
         val quality  = if (format == ExportFormat.PNG) 100 else 92
 
-        val stream = openOutputStream(context, fileName, mime, "Pictures/SmartVisionAI")
-        bmp.compress(compFmt, quality, stream)
-        stream.flush(); stream.close()
+        val folder = "Pictures/SmartVisionAI"
+        val (savedUri, stream) = createFileUriAndStream(context, fileName, mime, folder)
+        try {
+            bmp.compress(compFmt, quality, stream)
+            stream.flush()
+        } finally {
+            stream.close()
+        }
 
-        return getUriForName(context, fileName, mime, "Pictures/SmartVisionAI")
+        return savedUri
     }
 
-    // ── MediaStore helpers ─────────────────────────────────────────────────────
-    private fun openOutputStream(context: Context, name: String, mime: String, folder: String): OutputStream {
+    // ── MediaStore and File helpers ────────────────────────────────────────────
+    private fun createFileUriAndStream(
+        context: Context,
+        name: String,
+        mime: String,
+        folder: String
+    ): Pair<Uri, OutputStream> {
+        val resolver = context.contentResolver
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val resolver = context.contentResolver
-            val collection = if (mime == "application/pdf")
-                MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-            else MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            val collection = if (mime == "application/pdf") {
+                MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            } else {
+                MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            }
 
             val cv = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, name)
                 put(MediaStore.MediaColumns.MIME_TYPE, mime)
                 put(MediaStore.MediaColumns.RELATIVE_PATH, folder)
             }
-            val insertUri = resolver.insert(collection, cv)!!
-            resolver.openOutputStream(insertUri)!!
+            val insertUri = resolver.insert(collection, cv) ?: throw Exception("Failed to insert MediaStore entry")
+            val outputStream = resolver.openOutputStream(insertUri) ?: throw Exception("Failed to open output stream")
+            Pair(insertUri, outputStream)
         } else {
-            val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "SmartVisionAI")
-            dir.mkdirs()
-            FileOutputStream(File(dir, name))
+            val publicDir = if (mime == "application/pdf") {
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+            } else {
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+            }
+            val dir = File(publicDir, "SmartVisionAI")
+            if (!dir.exists()) {
+                dir.mkdirs()
+            }
+            val file = File(dir, name)
+            val outputStream = FileOutputStream(file)
+            val uri = Uri.fromFile(file)
+            Pair(uri, outputStream)
         }
-    }
-
-    private fun getUriForName(context: Context, name: String, mime: String, folder: String): Uri {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val collection = if (mime == "application/pdf")
-                MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-            else MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-
-            val cursor = context.contentResolver.query(collection,
-                arrayOf(MediaStore.MediaColumns._ID),
-                "${MediaStore.MediaColumns.DISPLAY_NAME} = ?", arrayOf(name), null)
-            cursor?.use { if (it.moveToFirst()) {
-                val id = it.getLong(0)
-                return Uri.withAppendedPath(collection, id.toString())
-            }}
-        }
-        return Uri.EMPTY
     }
 
     // ── Temp file helpers ──────────────────────────────────────────────────────
@@ -150,6 +161,13 @@ class DocScannerRepository @Inject constructor() {
 
     // ── Get file size from URI ─────────────────────────────────────────────────
     fun getFileSizeKb(context: Context, uri: Uri): Long {
+        if (uri.scheme == "file") {
+            val path = uri.path ?: return 0L
+            val file = File(path)
+            if (file.exists()) {
+                return file.length() / 1024
+            }
+        }
         val cursor = context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.SIZE), null, null, null)
         return cursor?.use { if (it.moveToFirst()) it.getLong(0) / 1024 else 0L } ?: 0L
     }

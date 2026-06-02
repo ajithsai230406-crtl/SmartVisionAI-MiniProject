@@ -45,10 +45,10 @@ class QrScannerViewModel @Inject constructor(
     private var cooldownJob: Job? = null
 
     // ── Live frame scan ────────────────────────────────────────────────────────
-    fun analyzeFrame(image: Image, rotation: Int) {
+    suspend fun analyzeFrame(image: Image, rotation: Int) {
         if (!analysisLock.compareAndSet(false, true)) return
         if (_scanState.value is QrScanState.Success) { analysisLock.set(false); return }
-        viewModelScope.launch {
+        try {
             repo.scanFromImage(image, rotation)
                 .onSuccess { code ->
                     if (code != null) {
@@ -57,11 +57,31 @@ class QrScannerViewModel @Inject constructor(
                         saveHistory(code)
                         // Cooldown: prevent re-scan for 3 seconds
                         cooldownJob?.cancel()
-                        cooldownJob = launch { delay(3000); if (_scanState.value is QrScanState.Success) resumeScan() }
+                        cooldownJob = viewModelScope.launch { delay(3000); if (_scanState.value is QrScanState.Success) resumeScan() }
                     }
                 }
                 .onFailure { /* silent — camera frames fail regularly */ }
+        } finally {
             analysisLock.set(false)
+        }
+    }
+
+    // ── Gallery QR Scan ────────────────────────────────────────────────────────
+    fun analyzeFromUri(context: Context, uri: Uri) = viewModelScope.launch {
+        _scanState.value = QrScanState.Scanning
+        runCatching {
+            val bitmap = android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
+            repo.scanFromBitmap(bitmap).getOrThrow()
+        }.onSuccess { code ->
+            if (code != null) {
+                _scanState.value = QrScanState.Success(code)
+                addToHistory(code)
+                saveHistory(code)
+            } else {
+                _scanState.value = QrScanState.Error("No valid QR code or barcode found in image.")
+            }
+        }.onFailure { e ->
+            _scanState.value = QrScanState.Error(e.message ?: "Failed to import gallery image.")
         }
     }
 

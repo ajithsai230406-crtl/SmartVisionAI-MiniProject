@@ -23,6 +23,7 @@ import com.smartvision.ai.ui.theme.*
 @Composable
 fun LoginScreen(
     onLoginSuccess: () -> Unit,
+    onNavigate: (String) -> Unit,
     viewModel: AuthViewModel = hiltViewModel()
 ) {
     val message by viewModel.message.collectAsStateWithLifecycle()
@@ -306,7 +307,7 @@ fun LoginScreen(
                             RoundedCornerShape(26.dp)
                         )
                         .background(NavyCard)
-                        .clickable { onLoginSuccess() },
+                        .clickable { viewModel.loginAsGuest { onLoginSuccess() } },
                     contentAlignment = Alignment.Center
                 ) {
                     Row(
@@ -327,17 +328,36 @@ fun LoginScreen(
                 Spacer(Modifier.height(20.dp))
 
                 // ── Terms ─────────────────────────────────────────────────
-                Text(
-                    buildAnnotatedString {
-                        append("By continuing, you agree to our ")
-                        withStyle(SpanStyle(color = ext.neonBlue)) { append("Terms") }
-                        append(" & ")
-                        withStyle(SpanStyle(color = ext.neonBlue)) { append("Privacy Policy") }
-                    },
-                    style     = MaterialTheme.typography.bodySmall,
-                    color     = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "By continuing, you agree to our ",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "Terms",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ext.neonBlue,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clickable { onNavigate(com.smartvision.ai.compose.navigation.Routes.TERMS_CONDITIONS) }
+                    )
+                    Text(
+                        " & ",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "Privacy Policy",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ext.neonBlue,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clickable { onNavigate(com.smartvision.ai.compose.navigation.Routes.PRIVACY_POLICY) }
+                    )
+                }
 
                 Spacer(Modifier.height(32.dp))
             }

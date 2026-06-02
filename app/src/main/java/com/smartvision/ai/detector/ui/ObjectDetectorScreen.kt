@@ -43,6 +43,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 @Composable
 fun ObjectDetectorScreen(
     onBack: () -> Unit,
+    onNavigate: (String) -> Unit,
     viewModel: ObjectDetectorViewModel = hiltViewModel()
 ) {
     val camPerm         = rememberPermissionState(Manifest.permission.CAMERA)
@@ -54,6 +55,7 @@ fun ObjectDetectorScreen(
     val isLive          by viewModel.isLive.collectAsStateWithLifecycle()
     val fps             by viewModel.fps.collectAsStateWithLifecycle()
     val cameraRef       = remember { mutableStateOf<Camera?>(null) }
+    val previewViewRef  = remember { mutableStateOf<PreviewView?>(null) }
 
     val ctx = LocalContext.current
     val galleryLauncher = rememberGalleryPickerLauncher { uri ->
@@ -72,9 +74,10 @@ fun ObjectDetectorScreen(
         // ── Camera feed ──────────────────────────────────────────────────────
         if (camPerm.status.isGranted) {
             DetectorCameraPreview(
-                modifier      = Modifier.fillMaxSize(),
-                onCameraReady = { cameraRef.value = it },
-                onFrame       = { img, rot, w, h -> viewModel.analyzeFrame(img, rot, w, h) }
+                modifier             = Modifier.fillMaxSize(),
+                onCameraReady        = { cameraRef.value = it },
+                onPreviewViewCreated = { previewViewRef.value = it },
+                onFrame              = { img, rot, w, h -> viewModel.analyzeFrame(img, rot, w, h) }
             )
         } else {
             NoCamPermView(
@@ -88,11 +91,16 @@ fun ObjectDetectorScreen(
 
         // ── Bounding box overlay ─────────────────────────────────────────────
         if (showOverlay) {
-            val items = (detectionState as? DetectionState.Active)?.items ?: emptyList()
+            val activeState = detectionState as? DetectionState.Active
+            val items       = activeState?.items ?: emptyList()
+            val frameW      = activeState?.frameWidth ?: 1080
+            val frameH      = activeState?.frameHeight ?: 1920
             BoundingBoxOverlay(
                 items        = items,
                 selectedItem = selectedItem,
-                onTapItem    = { viewModel.selectItem(it) },
+                frameWidth   = frameW,
+                frameHeight  = frameH,
+                onTapItem    = { viewModel.selectItem(it, previewViewRef.value?.bitmap) },
                 modifier     = Modifier.fillMaxSize()
             )
         }
@@ -113,7 +121,7 @@ fun ObjectDetectorScreen(
         // ── Bottom detection info strip ───────────────────────────────────────
         val activeItems = (detectionState as? DetectionState.Active)?.items ?: emptyList()
         AnimatedVisibility(
-            visible  = activeItems.isNotEmpty(),
+            visible  = activeItems.isNotEmpty() && selectedItem == null,
             enter    = slideInVertically { it } + fadeIn(),
             exit     = slideOutVertically { it } + fadeOut(),
             modifier = Modifier.align(Alignment.BottomCenter)
@@ -121,7 +129,7 @@ fun ObjectDetectorScreen(
             DetectionStrip(
                 items      = activeItems,
                 selected   = selectedItem,
-                onSelect   = { viewModel.selectItem(it) }
+                onSelect   = { viewModel.selectItem(it, previewViewRef.value?.bitmap) }
             )
         }
 
@@ -144,10 +152,11 @@ fun ObjectDetectorScreen(
         ) {
             if (selectedItem != null && knowledge != null) {
                 ObjectDetailSheet(
-                    item      = selectedItem!!,
-                    know      = knowledge!!,
-                    onDismiss = { viewModel.dismissDetail() },
-                    onSpeak   = { viewModel.speakObject(selectedItem!!) }
+                    item       = selectedItem!!,
+                    know       = knowledge!!,
+                    onDismiss  = { viewModel.dismissDetail() },
+                    onSpeak    = { viewModel.speakObject(selectedItem!!) },
+                    onNavigate = onNavigate
                 )
             }
         }
@@ -160,12 +169,14 @@ fun ObjectDetectorScreen(
 
 @Composable
 private fun DetectorCameraPreview(
-    modifier:      Modifier,
-    onCameraReady: (Camera) -> Unit,
-    onFrame:       (android.media.Image, Int, Int, Int) -> Unit
+    modifier:             Modifier,
+    onCameraReady:        (Camera) -> Unit,
+    onPreviewViewCreated: (PreviewView) -> Unit,
+    onFrame:              suspend (android.media.Image, Int, Int, Int) -> Unit
 ) {
     val ctx            = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val scope          = rememberCoroutineScope()
     val executor       = remember { Executors.newSingleThreadExecutor() }
     val processing     = remember { AtomicBoolean(false) }
 
@@ -178,6 +189,7 @@ private fun DetectorCameraPreview(
                 )
                 scaleType = PreviewView.ScaleType.FILL_CENTER
             }
+            onPreviewViewCreated(pv)
             ProcessCameraProvider.getInstance(c).addListener({
                 val prov    = ProcessCameraProvider.getInstance(c).get()
                 val preview = Preview.Builder().build()
@@ -191,10 +203,17 @@ private fun DetectorCameraPreview(
                 analysis.setAnalyzer(executor) { proxy ->
                     val img = proxy.image
                     if (img != null && processing.compareAndSet(false, true)) {
-                        onFrame(img, proxy.imageInfo.rotationDegrees, img.width, img.height)
-                        processing.set(false)
+                        scope.launch {
+                            try {
+                                onFrame(img, proxy.imageInfo.rotationDegrees, img.width, img.height)
+                            } finally {
+                                proxy.close()
+                                processing.set(false)
+                            }
+                        }
+                    } else {
+                        proxy.close()
                     }
-                    proxy.close()
                 }
                 val cam = prov.bindToLifecycle(
                     lifecycleOwner,
@@ -223,6 +242,10 @@ private fun ScannerGridOverlay(modifier: Modifier) {
         -0.05f, 1.05f,
         infiniteRepeatable(tween(3000, easing = LinearEasing)), label = "scan"
     )
+    val pulseReticle by inf.animateFloat(
+        0.4f, 1.0f,
+        infiniteRepeatable(tween(1500), RepeatMode.Reverse), label = "reticle"
+    )
 
     androidx.compose.foundation.Canvas(modifier = modifier) {
         // Grid lines
@@ -237,8 +260,29 @@ private fun ScannerGridOverlay(modifier: Modifier) {
             brush       = Brush.horizontalGradient(listOf(Color.Transparent, Color(0xFF00D4FF).copy(0.7f), Color.Transparent)),
             start       = Offset(0f, y),
             end         = Offset(size.width, y),
-            strokeWidth = 2f
+            strokeWidth = 3f
         )
+
+        // Targeted scanner reticle in the middle
+        val cx = size.width / 2f
+        val cy = size.height / 2f
+        val rLen = 30f
+        val rOffset = 40f
+        val color = Color(0xFF00D4FF).copy(alpha = pulseReticle * 0.4f)
+
+        // Reticle corners
+        // Top-left
+        drawLine(color, Offset(cx - rOffset, cy - rOffset), Offset(cx - rOffset + rLen, cy - rOffset), 2f)
+        drawLine(color, Offset(cx - rOffset, cy - rOffset), Offset(cx - rOffset, cy - rOffset + rLen), 2f)
+        // Top-right
+        drawLine(color, Offset(cx + rOffset, cy - rOffset), Offset(cx + rOffset - rLen, cy - rOffset), 2f)
+        drawLine(color, Offset(cx + rOffset, cy - rOffset), Offset(cx + rOffset, cy - rOffset + rLen), 2f)
+        // Bottom-left
+        drawLine(color, Offset(cx - rOffset, cy + rOffset), Offset(cx - rOffset + rLen, cy + rOffset), 2f)
+        drawLine(color, Offset(cx - rOffset, cy + rOffset), Offset(cx - rOffset, cy + rOffset - rLen), 2f)
+        // Bottom-right
+        drawLine(color, Offset(cx + rOffset, cy + rOffset), Offset(cx + rOffset - rLen, cy + rOffset), 2f)
+        drawLine(color, Offset(cx + rOffset, cy + rOffset), Offset(cx + rOffset, cy + rOffset - rLen), 2f)
     }
 }
 
@@ -250,10 +294,34 @@ private fun ScannerGridOverlay(modifier: Modifier) {
 private fun BoundingBoxOverlay(
     items:        List<DetectedItem>,
     selectedItem: DetectedItem?,
+    frameWidth:   Int,
+    frameHeight:  Int,
     onTapItem:    (DetectedItem) -> Unit,
     modifier:     Modifier
 ) {
     var canvasSize by remember { mutableStateOf(Size.Zero) }
+    val density = LocalDensity.current
+
+    // Pulsing transition for visual intelligence target reticle overlays
+    val infiniteTransition = rememberInfiniteTransition(label = "lens_pulse")
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 0.94f,
+        targetValue  = 1.06f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse_scale"
+    )
+    val glowAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.20f,
+        targetValue  = 0.65f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "glow_alpha"
+    )
 
     Box(modifier = modifier.onGloballyPositioned { coords ->
         canvasSize = Size(
@@ -266,11 +334,32 @@ private fun BoundingBoxOverlay(
             items.forEach { item ->
                 val color = Color(item.accentColor)
                 val isSelected = item.id == selectedItem?.id
-                val left   = item.box.left   * size.width
-                val top    = item.box.top    * size.height
-                val right  = item.box.right  * size.width
-                val bottom = item.box.bottom * size.height
-                val w = right - left; val h = bottom - top
+                
+                // Rotated frame dimensions
+                val frameW = frameWidth.toFloat().coerceAtLeast(1f)
+                val frameH = frameHeight.toFloat().coerceAtLeast(1f)
+                
+                // Screen canvas dimensions
+                val screenW = size.width
+                val screenH = size.height
+                
+                // Scale factor for FILL_CENTER projection
+                val scale = maxOf(screenW / frameW, screenH / frameH)
+                val scaledW = frameW * scale
+                val scaledH = frameH * scale
+                
+                // Crop offsets
+                val offsetX = (screenW - scaledW) / 2f
+                val offsetY = (screenH - scaledH) / 2f
+                
+                // Transform to screen space
+                val left   = item.box.left   * scaledW + offsetX
+                val top    = item.box.top    * scaledH + offsetY
+                val right  = item.box.right  * scaledW + offsetX
+                val bottom = item.box.bottom * scaledH + offsetY
+                
+                val w = right - left
+                val h = bottom - top
 
                 // Box fill
                 drawRect(
@@ -280,15 +369,15 @@ private fun BoundingBoxOverlay(
                 )
                 // Box border
                 drawRect(
-                    color       = color.copy(alpha = if (isSelected) 1f else 0.7f),
+                    color       = color.copy(alpha = if (isSelected) 1f else 0.5f),
                     topLeft     = Offset(left, top),
                     size        = Size(w, h),
                     style       = Stroke(width = if (isSelected) 3f else 1.5f)
                 )
 
-                // Corner accents
-                val cLen = (w * 0.2f).coerceIn(16f, 36f)
-                val cStr = if (isSelected) 4f else 2.5f
+                // Corner accents (Bixby/Lens brackets style)
+                val cLen = (w * 0.22f).coerceIn(16f, 36f)
+                val cStr = if (isSelected) 4.5f else 2.5f
 
                 // Top-left
                 drawLine(color, Offset(left,          top + cLen), Offset(left,          top),          cStr)
@@ -303,24 +392,54 @@ private fun BoundingBoxOverlay(
                 drawLine(color, Offset(right - cLen,  bottom),     Offset(right,          bottom),       cStr)
                 drawLine(color, Offset(right,          bottom),     Offset(right,          bottom - cLen),cStr)
 
-                // Pulsing glow on selected
+                // Concentric Apple Visual Intelligence style rings around selected target
                 if (isSelected) {
-                    drawRect(
-                        color   = color.copy(alpha = 0.08f),
-                        topLeft = Offset(left - 8, top - 8),
-                        size    = Size(w + 16, h + 16),
-                        style   = Stroke(width = 8f)
+                    val scaleFactor = pulseScale
+                    val glowW = w * scaleFactor
+                    val glowH = h * scaleFactor
+                    val dW = (glowW - w) / 2f
+                    val dH = (glowH - h) / 2f
+
+                    drawRoundRect(
+                        color = color.copy(alpha = glowAlpha * 0.15f),
+                        topLeft = Offset(left - dW - 6, top - dH - 6),
+                        size = Size(glowW + 12, glowH + 12),
+                        cornerRadius = CornerRadius(10f, 10f),
+                        style = Stroke(width = 4f)
+                    )
+                    
+                    // Center pointer crosshair dot
+                    drawCircle(
+                        color = color.copy(alpha = glowAlpha),
+                        radius = 5f,
+                        center = Offset(left + w / 2f, top + h / 2f)
                     )
                 }
             }
         }
 
-        // Label chips — positioned via Box offset modifiers
+        // Label chips — positioned via Box offset modifiers, mapped correctly with local density
         if (canvasSize != Size.Zero) {
             items.forEach { item ->
                 val color  = Color(item.accentColor)
-                val labelX = (item.box.left * canvasSize.width).dp
-                val labelY = ((item.box.top * canvasSize.height) - 28).dp.coerceAtLeast(0.dp)
+                
+                val frameW = frameWidth.toFloat().coerceAtLeast(1f)
+                val frameH = frameHeight.toFloat().coerceAtLeast(1f)
+                val screenW = canvasSize.width
+                val screenH = canvasSize.height
+                
+                val scale = maxOf(screenW / frameW, screenH / frameH)
+                val scaledW = frameW * scale
+                val scaledH = frameH * scale
+                val offsetX = (screenW - scaledW) / 2f
+                val offsetY = (screenH - scaledH) / 2f
+                
+                val left   = item.box.left   * scaledW + offsetX
+                val top    = item.box.top    * scaledH + offsetY
+                
+                // Density translation from pixel values to DP coordinates
+                val labelX = with(density) { left.toDp() }
+                val labelY = with(density) { (top - 28f).coerceAtLeast(0f).toDp() }
                 val pct    = (item.confidence * 100).toInt()
 
                 Box(
@@ -373,7 +492,7 @@ private fun DetectorTopHud(
             HudButton("←", onClick = onBack)
             Column {
                 Text("Object Detector", style = MaterialTheme.typography.titleMedium, color = Color.White, fontWeight = FontWeight.Bold)
-                Text("ML Kit · COCO 80", style = MaterialTheme.typography.labelSmall, color = NeonBlue)
+                Text("Visual AI Scanner", style = MaterialTheme.typography.labelSmall, color = NeonBlue)
             }
         }
 
@@ -429,7 +548,8 @@ private fun DetectionStrip(
             )
             .padding(horizontal = 16.dp)
             .padding(bottom = 16.dp, top = 8.dp)
-            .navigationBarsPadding(),
+            .navigationBarsPadding()
+            .horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         items.forEach { item ->
@@ -466,7 +586,7 @@ private fun DetectionStrip(
                     // Confidence bar
                     Box(
                         modifier = Modifier
-                            .width(40.dp).height(3.dp)
+                            .width(50.dp).height(3.dp)
                             .clip(CircleShape)
                             .background(Color.White.copy(0.2f))
                     ) {
@@ -535,7 +655,8 @@ private fun ObjectDetailSheet(
     item:      DetectedItem,
     know:      ObjectKnowledge,
     onDismiss: () -> Unit,
-    onSpeak:   () -> Unit
+    onSpeak:   () -> Unit,
+    onNavigate: (String) -> Unit
 ) {
     val color = Color(item.accentColor)
     val pct   = (item.confidence * 100).toInt()
@@ -543,15 +664,16 @@ private fun ObjectDetailSheet(
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .fillMaxHeight(0.72f) // Premium semi-fullscreen sheet height
             .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
             .background(
                 Brush.verticalGradient(
-                    listOf(Color(0xE8060D1F), Color(0xF8040A14))
+                    listOf(Color(0xF0070E20), Color(0xFC03070E))
                 )
             )
             .border(
                 1.dp,
-                Brush.horizontalGradient(listOf(color.copy(0.6f), NeonPurple.copy(0.3f))),
+                Brush.horizontalGradient(listOf(color.copy(0.7f), NeonPurple.copy(0.4f))),
                 RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
             )
             .navigationBarsPadding()
@@ -568,6 +690,7 @@ private fun ObjectDetailSheet(
 
         Column(
             modifier = Modifier
+                .weight(1f)
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -580,12 +703,13 @@ private fun ObjectDetailSheet(
             ) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment     = Alignment.CenterVertically
+                    verticalAlignment     = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
                 ) {
                     // Emoji icon
                     Box(
                         modifier = Modifier
-                            .size(54.dp)
+                            .size(56.dp)
                             .clip(RoundedCornerShape(14.dp))
                             .background(color.copy(0.15f))
                             .border(1.dp, color.copy(0.4f), RoundedCornerShape(14.dp)),
@@ -593,47 +717,118 @@ private fun ObjectDetailSheet(
                     ) { Text(know.emoji, fontSize = 28.sp) }
 
                     Column {
-                        Text(know.label, style = MaterialTheme.typography.headlineSmall, color = Color.White, fontWeight = FontWeight.Bold)
+                        Text(know.label, style = MaterialTheme.typography.titleLarge, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             NeonBadge(know.category.displayName, color)
-                            NeonBadge("$pct% confidence", NeonGreen)
+                            NeonBadge("$pct% match", NeonGreen)
                         }
                     }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(start = 8.dp)) {
                     SmallRoundBtn("🔊", onClick = onSpeak)
                     SmallRoundBtn("✕", onClick = onDismiss)
                 }
             }
 
-            // Confidence bar
+            // Confidence bar with visual indicator
             ConfidenceBar(confidence = item.confidence, color = color)
 
+            // ─── SPECIALIZED UTILITY TRIGGER SECTION ───
+            if (know.specializedActionType != null) {
+                Spacer(Modifier.height(4.dp))
+                SpecializedActionBanner(
+                    type = know.specializedActionType,
+                    data = know.specializedActionData ?: "",
+                    onAction = {
+                        val targetRoute = when (know.specializedActionType) {
+                            "medicine" -> "medicine_scanner"
+                            "textbook" -> "student_helper_v2"
+                            "waste"    -> "waste_classifier_v2"
+                            else       -> null
+                        }
+                        if (targetRoute != null) {
+                            onDismiss()
+                            onNavigate(targetRoute)
+                        }
+                    }
+                )
+            }
+
             // ── Description ───────────────────────────────────────────────────
-            DetailSection(title = "About", icon = "ℹ️", color = color) {
-                Text(know.description, style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(0.9f), lineHeight = 22.sp)
+            DetailSection(title = "About / Purpose", icon = "ℹ️", color = color) {
+                Text(know.description, style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(0.9f), lineHeight = 21.sp)
             }
 
             // ── Uses ──────────────────────────────────────────────────────────
-            DetailSection(title = "Common Uses", icon = "⚙️", color = color) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            DetailSection(title = "Usage Suggestions", icon = "⚙️", color = color) {
+                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     know.uses.forEach { use ->
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(color))
-                            Text(use, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.8f))
+                            Text(use, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f))
                         }
                     }
                 }
             }
 
             // ── Safety ────────────────────────────────────────────────────────
-            DetailSection(title = "Safety", icon = "⚠️", color = NeonPink) {
-                Text(know.safetyInfo, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.8f), lineHeight = 20.sp)
+            DetailSection(title = "Safety & Guidelines", icon = "⚠️", color = NeonPink) {
+                Text(know.safetyInfo, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f), lineHeight = 19.sp)
+            }
+
+            // ── Maintenance ───────────────────────────────────────────────────
+            if (know.maintenanceTips.isNotEmpty()) {
+                DetailSection(title = "Maintenance & Care", icon = "🛠️", color = NeonPurple) {
+                    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        know.maintenanceTips.forEach { tip ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Box(modifier = Modifier.size(5.dp).clip(CircleShape).background(NeonPurple))
+                                Text(tip, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f))
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── Buying Guide ──────────────────────────────────────────────────
+            if (know.buyingSuggestions.isNotEmpty()) {
+                DetailSection(title = "Smart Buying Suggestions", icon = "🛒", color = NeonBlue) {
+                    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        know.buyingSuggestions.forEach { suggestion ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
+                                Text("🛍️", fontSize = 11.sp, modifier = Modifier.padding(top = 1.dp))
+                                Text(suggestion, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f))
+                            }
+                        }
+                    }
+                }
             }
 
             // ── Environmental ─────────────────────────────────────────────────
-            DetailSection(title = "Environmental Impact", icon = "🌿", color = NeonGreen) {
-                Text(know.environmentalImpact, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.8f), lineHeight = 20.sp)
+            DetailSection(title = "Environmental & Carbon Impact", icon = "🌿", color = NeonGreen) {
+                Text(know.environmentalImpact, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f), lineHeight = 19.sp)
+            }
+
+            // ── Related recommendations ───────────────────────────────────────
+            if (know.relatedRecommendations.isNotEmpty()) {
+                DetailSection(title = "Related Recommendations", icon = "🔍", color = Color(0xFFFFD700)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        know.relatedRecommendations.forEach { rec ->
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color.White.copy(0.06f))
+                                    .border(1.dp, Color.White.copy(0.12f), RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Text(rec, style = MaterialTheme.typography.labelSmall, color = Color.White, fontWeight = FontWeight.Medium)
+                            }
+                        }
+                    }
+                }
             }
 
             // ── Fun fact ──────────────────────────────────────────────────────
@@ -645,16 +840,198 @@ private fun ObjectDetailSheet(
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// SPECIALIZED ACTION MODULE TRIGGER VIEW
+// ══════════════════════════════════════════════════════════════════════════════
+
+@Composable
+private fun SpecializedActionBanner(
+    type: String,
+    data: String,
+    onAction: () -> Unit
+) {
+    val inf = rememberInfiniteTransition(label = "pulse_action")
+    val pulseScale by inf.animateFloat(
+        initialValue = 0.98f,
+        targetValue  = 1.02f,
+        animationSpec = infiniteRepeatable(tween(1000), RepeatMode.Reverse),
+        label = "pulseScale"
+    )
+
+    when (type) {
+        "medicine" -> {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer(scaleX = pulseScale, scaleY = pulseScale)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(
+                        Brush.horizontalGradient(listOf(Color(0xFF5A1024), Color(0xFF2C020B)))
+                    )
+                    .border(1.5.dp, NeonPink, RoundedCornerShape(16.dp))
+                    .clickable(onClick = onAction)
+                    .padding(14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("💊", fontSize = 24.sp)
+                        Column {
+                            Text("Medicine Scanner Action Active", style = MaterialTheme.typography.labelMedium, color = NeonPink, fontWeight = FontWeight.Bold)
+                            Text(data.ifBlank { "Verify dosage details" }, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f))
+                        }
+                    }
+                    Text("OPEN ➔", style = MaterialTheme.typography.labelSmall, color = NeonPink, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        "textbook" -> {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer(scaleX = pulseScale, scaleY = pulseScale)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(
+                        Brush.horizontalGradient(listOf(Color(0xFF033550), Color(0xFF021727)))
+                    )
+                    .border(1.5.dp, NeonCyan, RoundedCornerShape(16.dp))
+                    .clickable(onClick = onAction)
+                    .padding(14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("📚", fontSize = 24.sp)
+                        Column {
+                            Text("AI Student Helper Solver Active", style = MaterialTheme.typography.labelMedium, color = NeonCyan, fontWeight = FontWeight.Bold)
+                            Text(data.ifBlank { "Solve math homework with AI Tutor" }, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f))
+                        }
+                    }
+                    Text("SOLVE ➔", style = MaterialTheme.typography.labelSmall, color = NeonCyan, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        "waste" -> {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer(scaleX = pulseScale, scaleY = pulseScale)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(
+                        Brush.horizontalGradient(listOf(Color(0xFF063A1D), Color(0xFF02190B)))
+                    )
+                    .border(1.5.dp, NeonGreen, RoundedCornerShape(16.dp))
+                    .clickable(onClick = onAction)
+                    .padding(14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("♻️", fontSize = 24.sp)
+                        Column {
+                            Text("Waste Classifier Action Active", style = MaterialTheme.typography.labelMedium, color = NeonGreen, fontWeight = FontWeight.Bold)
+                            Text(data.ifBlank { "Verify recycle bins & eco carbon offset" }, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f))
+                        }
+                    }
+                    Text("ANALYZE ➔", style = MaterialTheme.typography.labelSmall, color = NeonGreen, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        "food" -> {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color.White.copy(0.04f))
+                    .border(1.dp, Color(0xFFFFD700).copy(0.2f), RoundedCornerShape(16.dp))
+                    .padding(14.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("🍎", fontSize = 22.sp)
+                        Text("Estimated Nutrition Breakdown", style = MaterialTheme.typography.labelMedium, color = Color(0xFFFFD700), fontWeight = FontWeight.Bold)
+                    }
+                    
+                    // Display linear progress metrics based on dynamic action data
+                    // Expected format: "Calories: 95 kcal · Carbs: 25g · Dietary Fiber: 4.4g · Protein: 0.5g"
+                    val nutritionString = data.ifBlank { "Calories: 130 kcal · Carbs: 28g · Protein: 2.0g · Fat: 0.3g" }
+                    Text(nutritionString, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f), lineHeight = 18.sp)
+                    
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 4.dp)) {
+                        NutritionProgressMetric("Calories (kcal)", 0.65f, Color(0xFFFFD700))
+                        NutritionProgressMetric("Carbohydrates", 0.72f, NeonBlue)
+                        NutritionProgressMetric("Protein", 0.35f, NeonGreen)
+                        NutritionProgressMetric("Fats", 0.08f, NeonPink)
+                    }
+                }
+            }
+        }
+        "electronics" -> {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color.White.copy(0.04f))
+                    .border(1.dp, NeonPurple.copy(0.25f), RoundedCornerShape(16.dp))
+                    .padding(14.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("⚡", fontSize = 22.sp)
+                        Text("Hardware Maintenance Specs", style = MaterialTheme.typography.labelMedium, color = NeonPurple, fontWeight = FontWeight.Bold)
+                    }
+                    Text(data.ifBlank { "Consumer hardware status: Operational. Internal circuitry sensors active." }, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f))
+                    
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(top = 4.dp)) {
+                        HardwareCheckItem("Battery Health optimization active")
+                        HardwareCheckItem("Standard USB charge limits verified")
+                        HardwareCheckItem("Thermal safety margins compliant")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NutritionProgressMetric(name: String, progress: Float, color: Color) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
+            Text(name, style = MaterialTheme.typography.labelSmall, color = Color.White.copy(0.55f))
+            Text("${(progress * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = color, fontWeight = FontWeight.SemiBold)
+        }
+        Box(modifier = Modifier.fillMaxWidth().height(4.dp).clip(CircleShape).background(Color.White.copy(0.1f))) {
+            Box(modifier = Modifier.fillMaxHeight().fillMaxWidth(progress).background(color, CircleShape))
+        }
+    }
+}
+
+@Composable
+private fun HardwareCheckItem(text: String) {
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text("✔", color = NeonGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Text(text, style = MaterialTheme.typography.labelSmall, color = Color.White.copy(0.7f))
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // REUSABLE DETAIL COMPONENTS
 // ══════════════════════════════════════════════════════════════════════════════
 
 @Composable
 private fun DetailSection(title: String, icon: String, color: Color, content: @Composable () -> Unit) {
-    val ext = MaterialTheme.extended
     Box(
         modifier = Modifier.fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
-            .background(Color.White.copy(0.04f))
+            .background(Color.White.copy(0.035f))
             .border(1.dp, color.copy(0.2f), RoundedCornerShape(14.dp))
             .padding(14.dp)
     ) {

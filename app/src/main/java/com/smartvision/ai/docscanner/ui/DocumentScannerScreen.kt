@@ -69,6 +69,15 @@ fun DocumentScannerScreen(
         }
     }
 
+    // Storage permission launcher for older Android platforms (API <= 28)
+    val storagePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            viewModel.exportDocument()
+        }
+    }
+
     GradientBackground {
         Box(modifier = Modifier.fillMaxSize()) {
             Column(modifier = Modifier.fillMaxSize()) {
@@ -100,7 +109,19 @@ fun DocumentScannerScreen(
                             onFilterSelect = { viewModel.selectFilter(it) },
                             onFormatSelect = { viewModel.setExportFormat(it) },
                             onNameChange   = { viewModel.setDocName(it) },
-                            onSave         = { viewModel.exportDocument() },
+                            onSave         = {
+                                val writePermission = android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+                                val hasPermission = if (android.os.Build.VERSION.SDK_INT <= android.os.Build.VERSION_CODES.P) {
+                                    androidx.core.content.ContextCompat.checkSelfPermission(ctx, writePermission) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                                } else {
+                                    true
+                                }
+                                if (hasPermission) {
+                                    viewModel.exportDocument()
+                                } else {
+                                    storagePermissionLauncher.launch(writePermission)
+                                }
+                            },
                             onRescan       = {
                                 viewModel.resetScan()
                                 activity?.let { viewModel.launchScanner(it, scanLauncher) }
@@ -556,27 +577,80 @@ private fun DocSavedContent(
 
     Box(Modifier.fillMaxSize(), Alignment.Center) {
         Column(
-            modifier = Modifier.padding(24.dp),
+            modifier = Modifier.padding(24.dp).verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(20.dp)
+            verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            // Success icon
+            // Success icon with animated neon breathing halo
             Box(
-                modifier = Modifier.size(100.dp).scale(pulse)
+                modifier = Modifier.size(80.dp).scale(pulse)
                     .clip(CircleShape)
-                    .background(Brush.radialGradient(listOf(DocGreen.copy(0.3f), DocGreen.copy(0.1f))))
-                    .border(3.dp, DocGreen.copy(0.7f), CircleShape),
+                    .background(Brush.radialGradient(listOf(DocGreen.copy(0.3f), DocGreen.copy(0.08f))))
+                    .border(2.dp, DocGreen, CircleShape),
                 contentAlignment = Alignment.Center
-            ) { Text("✅", fontSize = 48.sp) }
+            ) { Text("✅", fontSize = 38.sp) }
 
-            Text("Document Saved!", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Saved Successfully!", style = MaterialTheme.typography.headlineSmall, color = Color.White, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                Text("Available locally in public directories", style = MaterialTheme.typography.bodySmall, color = DocGreen, textAlign = TextAlign.Center)
+            }
+
+            // Scanned Page Gallery Carousel Preview
+            if (doc.pages.isNotEmpty()) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text("📷 Document Preview", style = MaterialTheme.typography.labelMedium, color = DocBlue, fontWeight = FontWeight.SemiBold)
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(horizontal = 4.dp),
+                        modifier = Modifier.height(110.dp)
+                    ) {
+                        itemsIndexed(doc.pages) { idx, pageUri ->
+                            Box(
+                                modifier = Modifier
+                                    .size(width = 80.dp, height = 110.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(MaterialTheme.extended.glassCard)
+                                    .border(1.dp, DocBlue.copy(0.4f), RoundedCornerShape(10.dp))
+                            ) {
+                                AsyncImage(
+                                    model = pageUri,
+                                    contentDescription = "Page Preview ${idx + 1}",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp))
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .padding(4.dp)
+                                        .size(16.dp)
+                                        .clip(CircleShape)
+                                        .background(DocBlue),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "${idx + 1}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color.White,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             // Doc info card
             Box(
                 modifier = Modifier.fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
                     .background(MaterialTheme.extended.glassCard)
-                    .border(1.dp, DocGreen.copy(0.3f), RoundedCornerShape(16.dp))
+                    .border(1.dp, DocGreen.copy(0.35f), RoundedCornerShape(16.dp))
                     .padding(16.dp)
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

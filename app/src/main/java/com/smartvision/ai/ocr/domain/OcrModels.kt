@@ -38,27 +38,70 @@ sealed class TranslationState {
     data class Error(val message: String) : TranslationState()
 }
 
-/** Overall OCR scanner state */
+// Overall OCR scanner state
 sealed class OcrScanState {
     object Idle : OcrScanState()
     object Scanning : OcrScanState()
-    data class TextDetected(val result: OcrResult) : OcrScanState()
+    data class TextDetected(
+        val result:      OcrResult,
+        val frameWidth:  Int,
+        val frameHeight: Int
+    ) : OcrScanState()
     object NoText : OcrScanState()
     data class Error(val message: String) : OcrScanState()
 }
 
+// ─── Helper for coordinate rotation ──────────────────────────────────────────
+private data class Float4(val f1: Float, val f2: Float, val f3: Float, val f4: Float)
+private fun val4(f1: Float, f2: Float, f3: Float, f4: Float) = Float4(f1, f2, f3, f4)
+
 // ─── Mapper: ML Kit Text → Domain ────────────────────────────────────────────
-fun Text.toDomain(imageWidth: Int, imageHeight: Int): OcrResult {
+fun Text.toDomain(imageWidth: Int, imageHeight: Int, rotation: Int = 0): OcrResult {
     val blocks = this.textBlocks.flatMap { block ->
         block.lines.map { line ->
             val bbox = line.boundingBox
+            val w = imageWidth.toFloat().coerceAtLeast(1f)
+            val h = imageHeight.toFloat().coerceAtLeast(1f)
+
+            val leftNorm   = (bbox?.left?.toFloat() ?: 0f) / w
+            val topNorm    = (bbox?.top?.toFloat() ?: 0f) / h
+            val rightNorm  = (bbox?.right?.toFloat() ?: 0f) / w
+            val bottomNorm = (bbox?.bottom?.toFloat() ?: 0f) / h
+
+            val mapped = when (rotation) {
+                90 -> val4(
+                    1f - bottomNorm,
+                    leftNorm,
+                    1f - topNorm,
+                    rightNorm
+                )
+                270 -> val4(
+                    topNorm,
+                    1f - rightNorm,
+                    bottomNorm,
+                    1f - leftNorm
+                )
+                180 -> val4(
+                    1f - rightNorm,
+                    1f - bottomNorm,
+                    1f - leftNorm,
+                    1f - topNorm
+                )
+                else -> val4(
+                    leftNorm,
+                    topNorm,
+                    rightNorm,
+                    bottomNorm
+                )
+            }
+
             RecognizedBlock(
                 text       = line.text,
                 confidence = line.confidence,
-                left       = (bbox?.left?.toFloat() ?: 0f) / imageWidth,
-                top        = (bbox?.top?.toFloat() ?: 0f) / imageHeight,
-                right      = (bbox?.right?.toFloat() ?: 0f) / imageWidth,
-                bottom     = (bbox?.bottom?.toFloat() ?: 0f) / imageHeight,
+                left       = mapped.f1.coerceIn(0f, 1f),
+                top        = mapped.f2.coerceIn(0f, 1f),
+                right      = mapped.f3.coerceIn(0f, 1f),
+                bottom     = mapped.f4.coerceIn(0f, 1f),
                 angle      = line.angle
             )
         }

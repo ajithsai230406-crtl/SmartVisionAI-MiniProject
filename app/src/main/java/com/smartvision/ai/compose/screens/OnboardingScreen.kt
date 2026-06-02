@@ -45,12 +45,22 @@ private val pages = listOf(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun OnboardingScreen(onFinished: () -> Unit) {
+fun OnboardingScreen(
+    onFinished: () -> Unit,
+    onNavigate: (String) -> Unit
+) {
     val ext = MaterialTheme.extended
     val pagerState = rememberPagerState(pageCount = { pages.size })
     val scope = rememberCoroutineScope()
 
     GradientBackground {
+        // Enforce professional Legal Consent dialog on first launch
+        LegalConsentDialog(
+            onViewPrivacy = { onNavigate(com.smartvision.ai.compose.navigation.Routes.PRIVACY_POLICY) },
+            onViewTerms   = { onNavigate(com.smartvision.ai.compose.navigation.Routes.TERMS_CONDITIONS) },
+            onConsentAccepted = { /* Consent accepted and persistent SharedPreferences updated */ }
+        )
+
         Column(
             modifier = Modifier
                 .fillMaxSize()

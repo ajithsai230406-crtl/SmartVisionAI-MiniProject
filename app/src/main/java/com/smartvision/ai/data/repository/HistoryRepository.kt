@@ -19,4 +19,8 @@ class HistoryRepository @Inject constructor(
     }
 
     suspend fun clear() = dao.clear()
+
+    suspend fun deleteByTypeOlderThan(type: String, timestamp: Long) = dao.deleteByTypeOlderThan(type, timestamp)
+    suspend fun deleteByTypesOlderThan(types: List<String>, timestamp: Long) = dao.deleteByTypesOlderThan(types, timestamp)
 }
+

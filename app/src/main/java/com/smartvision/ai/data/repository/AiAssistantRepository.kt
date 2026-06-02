@@ -40,22 +40,26 @@ class AiAssistantRepository @Inject constructor(
     ): String = withContext(Dispatchers.IO) {
         runCatching {
             val systemPrompt = """
-                You are a helpful, professional, and highly intelligent AI Assistant for the "Smart Vision AI" mobile app.
-                Smart Vision AI is a dark-neon premium Android app designed with modules such as:
+                You are a highly intelligent, premium AI assistant for the "Smart Vision AI" app.
+                Smart Vision AI is a dark-neon premium Android app designed with these specialized modules:
                 1. Object Detector (Cyan badges, real-time object overlays)
-                2. OCR Translator (Google Lens style viewfinder selective scanner)
-                3. Student Helper (Google Lens homework steps solver, tutor chats)
+                2. OCR Translator (Google Lens style selective scanner)
+                3. Student Helper (Google Lens homework solver, tutor chats, math/science formulas)
                 4. Waste Classifier (Green badges, eco-friendly recycling classifications)
-                5. Voice Translator (real-time conversations)
+                5. Voice Translator (real-time conversational audio translation)
                 6. Smart Text Translator (context translation with native explanations)
                 7. QR Scanner (fast scan codes)
                 8. Document Scanner (PDF export filters)
-                9. Medicine Scanner (pill scanner guidelines)
+                9. Medicine Scanner (pill scanner warning and dosage guidelines)
                 
                 Current App Screen Route Context: ${contextRoute ?: "Home Dashboard"}
                 
-                Maintain conversational context. Analyze the previous conversation history provided below and continue the discussion naturally like a premium assistant (e.g. ChatGPT/Gemini). Focus on resolving user doubts, describing active screen module features, or giving practical advice.
-                Keep responses concise, clear, and informative (2-4 clear sentences).
+                Guidelines:
+                - You can answer ANY educational, scientific, coding, mathematical, or general inquiry dynamically.
+                - Maintain context based on the conversation history.
+                - Never use template or hardcoded fallback responses. 
+                - Be comprehensive, professional, and extremely helpful.
+                - Keep responses clean, descriptive, and direct (between 2 to 5 sentences depending on complexity).
             """.trimIndent()
 
             val finalPrompt = """
@@ -86,16 +90,26 @@ class AiAssistantRepository @Inject constructor(
             val responseText = response.text?.trim() ?: throw Exception("Empty response")
             cacheDao.insertCache(GeminiCacheEntity(promptHash, finalPrompt, responseText))
             responseText
-        }.getOrElse {
-            // Safe offline fallback
+        }.getOrElse { e ->
+            // Smart dynamic offline fallback that feels conversational and respects the query
             val lower = prompt.lowercase()
+            val queryTopic = prompt.split("\\s+".toRegex())
+                .map { it.replace(Regex("[^a-zA-Z]"), "") }
+                .firstOrNull { it.length > 4 } ?: "topics"
+            
             when {
-                "ocr" in lower || "scan" in lower -> "Use the OCR Scanner to crop, translate, and extract native-language meanings from printed texts!"
-                "medicine" in lower -> "Point the Medicine Scanner at pill bottles to read educational warning and dosage guides."
-                "waste" in lower || "recycle" in lower -> "Open the Waste Classifier to identify plastic, glass, and paper recyclables."
-                "translate" in lower -> "Text and Voice Translators support offline translation and native context explanations."
-                "student" in lower || "math" in lower -> "Use the Student Helper module to crop any formulas and solve them step-by-step!"
-                else -> "I can assist you with OCR translations, voice recording, recycling guidelines, or project viva details!"
+                "ocr" in lower || "scan" in lower || "text" in lower -> 
+                    "I am currently operating in offline mode, but you can use our premium OCR Scanner module to crop, translate, and extract native-language meanings from printed texts directly!"
+                "medicine" in lower || "pill" in lower || "drug" in lower -> 
+                    "While offline, I recommend opening the Medicine Scanner and pointing it at pill bottles to read essential dosage and safety guidelines."
+                "waste" in lower || "recycle" in lower || "plastic" in lower -> 
+                    "Under offline mode, you can still launch the Waste Classifier to scan and identify plastic, glass, or paper recyclables."
+                "translate" in lower || "voice" in lower || "speech" in lower -> 
+                    "You can access our Text and Voice Translators which support offline translation and context-rich definitions."
+                "student" in lower || "math" in lower || "science" in lower || "solve" in lower -> 
+                    "While offline, the Student Helper is ready! Simply crop any formula or problem to receive structured, step-by-step assistance."
+                else -> 
+                    "I'd love to help you with '$queryTopic'! Currently, I'm running in offline mode. Once your connection is restored, I can provide full Gemini AI analysis. For now, feel free to try our offline OCR, Waste Classifier, or Student Helper modules!"
             }
         }
     }
@@ -110,24 +124,25 @@ class AiAssistantRepository @Inject constructor(
         contextRoute: String? = null
     ): Flow<String> = flow {
         val systemPrompt = """
-            You are a helpful, professional, and highly intelligent AI Assistant for the "Smart Vision AI" mobile app.
-            Smart Vision AI is a dark-neon premium Android app designed with modules such as:
+            You are a highly intelligent, premium AI assistant for the "Smart Vision AI" app.
+            Smart Vision AI is a dark-neon premium Android app designed with these specialized modules:
             1. Object Detector (Cyan badges, real-time object overlays)
-            2. OCR Translator (Google Lens style viewfinder selective scanner)
-            3. Student Helper (Google Lens homework steps solver, tutor chats)
+            2. OCR Translator (Google Lens style selective scanner)
+            3. Student Helper (Google Lens homework solver, tutor chats, math/science formulas)
             4. Waste Classifier (Green badges, eco-friendly recycling classifications)
-            5. Voice Translator (real-time conversations)
+            5. Voice Translator (real-time conversational audio translation)
             6. Smart Text Translator (context translation with native explanations)
             7. QR Scanner (fast scan codes)
             8. Document Scanner (PDF export filters)
-            9. Medicine Scanner (pill scanner guidelines)
+            9. Medicine Scanner (pill scanner warning and dosage guidelines)
             
             Current App Screen Route Context: ${contextRoute ?: "Home Dashboard"}
             
-            Maintain conversational context. Analyze the previous conversation history provided below and continue the discussion naturally like a premium assistant (e.g. ChatGPT/Gemini/Perplexity AI). 
-            Generate unique, intelligent, and contextually rich answers dynamically. Answer any educational queries, solve academic questions, explain medicine warnings, or give programming code snippets and complexity analyses. 
-            Do NOT repeat generic templates. Ensure responses are unique, tailored, and continue conversations naturally.
-            Keep responses clear, comprehensive, yet relatively concise for a premium mobile chat interface.
+            Guidelines:
+            - You can answer ANY educational, scientific, coding, mathematical, or general inquiry dynamically.
+            - Maintain context based on the conversation history.
+            - Generate unique, intelligent, and contextually rich answers. Feel free to explain concepts, provide structured steps, code snippets, or analytical breakdowns.
+            - Keep responses comprehensive yet concise enough to fit comfortably on a mobile chat interface.
         """.trimIndent()
 
         val finalPrompt = """
@@ -140,22 +155,31 @@ class AiAssistantRepository @Inject constructor(
             Assistant:
         """.trimIndent()
 
-        // Stream the content chunk-by-chunk using the official Gemini SDK stream method!
+        // Stream the content chunk-by-chunk using the official Gemini SDK stream method
         geminiModel.generateContentStream(content {
             text(finalPrompt)
         }).collect { response ->
             response.text?.let { emit(it) }
         }
     }.catch { e ->
-        // Safe offline fallback
         val lower = prompt.lowercase()
+        val queryTopic = prompt.split("\\s+".toRegex())
+            .map { it.replace(Regex("[^a-zA-Z]"), "") }
+            .firstOrNull { it.length > 4 } ?: "topics"
+            
         val offlineReply = when {
-            "ocr" in lower || "scan" in lower -> "Use the OCR Scanner to crop, translate, and extract native-language meanings from printed texts!"
-            "medicine" in lower -> "Point the Medicine Scanner at pill bottles to read educational warning and dosage guides."
-            "waste" in lower || "recycle" in lower -> "Open the Waste Classifier to identify plastic, glass, and paper recyclables."
-            "translate" in lower -> "Text and Voice Translators support offline translation and native context explanations."
-            "student" in lower || "math" in lower -> "Use the Student Helper module to crop any formulas and solve them step-by-step!"
-            else -> "I can assist you with OCR translations, voice recording, recycling guidelines, or project viva details!"
+            "ocr" in lower || "scan" in lower || "text" in lower -> 
+                "I am currently operating in offline mode, but you can use our premium OCR Scanner module to crop, translate, and extract native-language meanings from printed texts directly!"
+            "medicine" in lower || "pill" in lower || "drug" in lower -> 
+                "While offline, I recommend opening the Medicine Scanner and pointing it at pill bottles to read essential dosage and safety guidelines."
+            "waste" in lower || "recycle" in lower || "plastic" in lower -> 
+                "Under offline mode, you can still launch the Waste Classifier to scan and identify plastic, glass, or paper recyclables."
+            "translate" in lower || "voice" in lower || "speech" in lower -> 
+                "You can access our Text and Voice Translators which support offline translation and context-rich definitions."
+            "student" in lower || "math" in lower || "science" in lower || "solve" in lower -> 
+                "While offline, the Student Helper is ready! Simply crop any formula or problem to receive structured, step-by-step assistance."
+            else -> 
+                "I'd love to help you with '$queryTopic'! Currently, I'm running in offline mode. Once your connection is restored, I can provide full Gemini AI analysis. For now, feel free to try our offline OCR, Waste Classifier, or Student Helper modules!"
         }
         emit(offlineReply)
     }.flowOn(Dispatchers.IO)

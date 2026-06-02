@@ -31,6 +31,7 @@ import com.smartvision.ai.compose.components.*
 import com.smartvision.ai.qr.domain.*
 import com.smartvision.ai.qr.presentation.QrScannerViewModel
 import com.smartvision.ai.ui.theme.*
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.concurrent.Executors
@@ -53,13 +54,18 @@ fun QrScannerScreen(
     val showHistory  by viewModel.showHistory.collectAsStateWithLifecycle()
     val cameraRef    = remember { mutableStateOf<Camera?>(null) }
 
+    val ctx         = LocalContext.current
+    val galleryLauncher = rememberGalleryPickerLauncher { uri ->
+        viewModel.analyzeFromUri(ctx, uri)
+    }
+
     LaunchedEffect(Unit) { if (!camPerm.status.isGranted) camPerm.launchPermissionRequest() }
     LaunchedEffect(flashEnabled) { cameraRef.value?.cameraControl?.enableTorch(flashEnabled) }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
 
         // ── Camera feed ────────────────────────────────────────────────────────
-        if (camPerm.status.isGranted) {
+        if (camPerm.status.isGranted && scanState is QrScanState.Idle) {
             QrCameraPreview(
                 modifier      = Modifier.fillMaxSize(),
                 onCameraReady = { cameraRef.value = it },
@@ -96,7 +102,8 @@ fun QrScannerScreen(
             historyCount = history.size,
             onBack       = onBack,
             onFlash      = { viewModel.toggleFlash() },
-            onHistory    = { viewModel.toggleHistory() }
+            onHistory    = { viewModel.toggleHistory() },
+            onGallery    = { galleryLauncher() }
         )
 
         // ── Bottom hint ────────────────────────────────────────────────────────
@@ -142,6 +149,38 @@ fun QrScannerScreen(
                 onTap     = { viewModel.copyToClipboard(it.rawValue) }
             )
         }
+
+        // ── Scanning indicator ────────────────────────────────────────────────
+        AnimatedVisibility(
+            visible  = scanState is QrScanState.Scanning,
+            enter    = fadeIn(), exit = fadeOut(),
+            modifier = Modifier.align(Alignment.Center)
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                CircularProgressIndicator(color = NeonBlue)
+                Text("Analyzing gallery QR code...", style = MaterialTheme.typography.bodySmall, color = Color.White)
+            }
+        }
+
+        // ── Error overlay card ─────────────────────────────────────────────────
+        AnimatedVisibility(
+            visible  = scanState is QrScanState.Error,
+            enter    = fadeIn(), exit = fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter).padding(20.dp)
+        ) {
+            val msg = (scanState as? QrScanState.Error)?.message ?: ""
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(NeonPink.copy(0.12f))
+                    .border(1.dp, NeonPink.copy(0.3f), RoundedCornerShape(14.dp))
+                    .padding(14.dp)
+                    .clickable { viewModel.resumeScan() }
+            ) {
+                Text("⚠️ $msg (Tap to dismiss)", style = MaterialTheme.typography.bodySmall, color = NeonPink)
+            }
+        }
     }
 }
 
@@ -150,11 +189,16 @@ fun QrScannerScreen(
 // ══════════════════════════════════════════════════════════════════════════════
 
 @Composable
-private fun QrCameraPreview(modifier: Modifier, onCameraReady: (Camera) -> Unit, onFrame: (android.media.Image, Int) -> Unit) {
+private fun QrCameraPreview(
+    modifier: Modifier,
+    onCameraReady: (Camera) -> Unit,
+    onFrame: suspend (android.media.Image, Int) -> Unit
+) {
     val ctx            = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val executor       = remember { Executors.newSingleThreadExecutor() }
     val processing     = remember { AtomicBoolean(false) }
+    val scope          = rememberCoroutineScope()
     AndroidView(modifier = modifier, factory = { c ->
         val pv = PreviewView(c).apply {
             layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
@@ -167,10 +211,19 @@ private fun QrCameraPreview(modifier: Modifier, onCameraReady: (Camera) -> Unit,
             analysis.setAnalyzer(executor) { proxy ->
                 val img = proxy.image
                 if (img != null && processing.compareAndSet(false, true)) {
-                    onFrame(img, proxy.imageInfo.rotationDegrees)
-                    processing.set(false)
+                    scope.launch {
+                        try {
+                            onFrame(img, proxy.imageInfo.rotationDegrees)
+                        } catch (e: Exception) {
+                            android.util.Log.e("QrScanner", "Frame analysis failed", e)
+                        } finally {
+                            processing.set(false)
+                            proxy.close()
+                        }
+                    }
+                } else {
+                    proxy.close()
                 }
-                proxy.close()
             }
             val cam = prov.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
             onCameraReady(cam)
@@ -229,7 +282,14 @@ private fun AnimatedQrFrame(isScanning: Boolean) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 @Composable
-private fun QrTopHud(flashEnabled: Boolean, historyCount: Int, onBack: () -> Unit, onFlash: () -> Unit, onHistory: () -> Unit) {
+private fun QrTopHud(
+    flashEnabled: Boolean,
+    historyCount: Int,
+    onBack: () -> Unit,
+    onFlash: () -> Unit,
+    onHistory: () -> Unit,
+    onGallery: () -> Unit
+) {
     Row(
         modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically
@@ -240,10 +300,13 @@ private fun QrTopHud(flashEnabled: Boolean, historyCount: Int, onBack: () -> Uni
             }
             Column {
                 Text("QR & Barcode Scanner", style = MaterialTheme.typography.titleMedium, color = Color.White, fontWeight = FontWeight.Bold)
-                Text("ML Kit · All formats", style = MaterialTheme.typography.labelSmall, color = NeonBlue)
+                Text("ML Kit • All formats", style = MaterialTheme.typography.labelSmall, color = NeonBlue)
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(Color.Black.copy(0.55f)).border(1.dp, Color.White.copy(0.15f), RoundedCornerShape(10.dp)).clickable(onClick = onGallery).padding(horizontal = 12.dp, vertical = 8.dp)) {
+                Text("🖼️", fontSize = 16.sp)
+            }
             // History button with badge
             Box {
                 Box(Modifier.clip(RoundedCornerShape(10.dp)).background(Color.Black.copy(0.55f)).border(1.dp, Color.White.copy(0.15f), RoundedCornerShape(10.dp)).clickable(onClick = onHistory).padding(horizontal = 12.dp, vertical = 8.dp)) {

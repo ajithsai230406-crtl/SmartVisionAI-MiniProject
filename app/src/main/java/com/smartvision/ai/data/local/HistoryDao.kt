@@ -16,4 +16,11 @@ interface HistoryDao {
 
     @Query("DELETE FROM history_records")
     suspend fun clear()
+
+    @Query("DELETE FROM history_records WHERE type = :type AND createdAt < :timestamp")
+    suspend fun deleteByTypeOlderThan(type: String, timestamp: Long): Int
+
+    @Query("DELETE FROM history_records WHERE type IN (:types) AND createdAt < :timestamp")
+    suspend fun deleteByTypesOlderThan(types: List<String>, timestamp: Long): Int
 }
+

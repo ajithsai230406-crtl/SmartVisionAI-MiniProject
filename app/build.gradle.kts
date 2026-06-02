@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -19,10 +21,18 @@ android {
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
+        val localProperties = Properties().apply {
+            val localPropertiesFile = rootProject.file("local.properties")
+            if (localPropertiesFile.exists()) {
+                localPropertiesFile.inputStream().use { load(it) }
+            }
+        }
+        val geminiApiKey = localProperties.getProperty("GEMINI_API_KEY") ?: ""
+
         buildConfigField(
             "String",
             "GEMINI_API_KEY",
-            "\"${project.findProperty("AIzaSyCso4kJv7x2oASdae9f1hUVGvsPXzCA0pQ") ?: ""}\""
+            "\"$geminiApiKey\""
         )
     }
 
@@ -100,6 +110,7 @@ dependencies {
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)
     implementation("androidx.datastore:datastore-preferences:1.1.2")
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")

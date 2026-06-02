@@ -72,6 +72,7 @@ fun OcrTranslatorScreen(
     val isLiveScan        by viewModel.isLiveScan.collectAsStateWithLifecycle()
     val flashEnabled      by viewModel.flashEnabled.collectAsStateWithLifecycle()
     val cameraRef         = remember { mutableStateOf<Camera?>(null) }
+    val previewViewRef    = remember { mutableStateOf<PreviewView?>(null) }
 
     // Sync flash to camera
     LaunchedEffect(flashEnabled) {
@@ -92,9 +93,10 @@ fun OcrTranslatorScreen(
         // ── Camera Preview ───────────────────────────────────────────────────────
         if (cameraPermission.status.isGranted) {
             OcrCameraPreview(
-                modifier      = Modifier.fillMaxSize(),
-                onCameraReady = { cameraRef.value = it },
-                onFrame       = { image, rotation, w, h ->
+                modifier             = Modifier.fillMaxSize(),
+                onCameraReady        = { cameraRef.value = it },
+                onPreviewViewCreated = { previewViewRef.value = it },
+                onFrame              = { image, rotation, w, h ->
                     viewModel.analyzeFrame(image, rotation, w, h)
                 }
             )
@@ -121,12 +123,17 @@ fun OcrTranslatorScreen(
                 val normBottom = cropRect.bottom / canvasHeight
 
                 val activeBlocks = if (isLiveScan) overlayBlocks else (frozenResult?.blocks ?: emptyList())
+                val activeState = scanState as? OcrScanState.TextDetected
+                val frameW = activeState?.frameWidth ?: 1080
+                val frameH = activeState?.frameHeight ?: 1920
 
                 // Draw detected highlighted text blocks inside viewfinder
                 if (activeBlocks.isNotEmpty()) {
                     TextSelectorOverlay(
                         blocks = activeBlocks,
                         selectedBlock = selectedBlock,
+                        frameWidth = frameW,
+                        frameHeight = frameH,
                         viewfinderLeft = normLeft,
                         viewfinderTop = normTop,
                         viewfinderRight = normRight,
@@ -165,9 +172,39 @@ fun OcrTranslatorScreen(
             FrozenOverlay(modifier = Modifier.fillMaxSize())
         }
 
-        // ── Bottom Panel Translation Console ────────────────────────────────────
+        // ── Dedicated Lens-Style Scan & Translate Pulsing Button ─────────────────
+        if (isLiveScan) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 32.dp)
+                    .size(76.dp)
+                    .clip(CircleShape)
+                    .background(Color.White)
+                    .border(4.dp, NeonCyan, CircleShape)
+                    .clickable {
+                        viewModel.freezeAndCapture()
+                        viewModel.translateCurrentText()
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                val inf = rememberInfiniteTransition(label = "ringPulse")
+                val ringScale by inf.animateFloat(1f, 1.25f, infiniteRepeatable(tween(1200), RepeatMode.Reverse))
+                val ringAlpha by inf.animateFloat(0.4f, 0f, infiniteRepeatable(tween(1200), RepeatMode.Reverse))
+
+                Box(
+                    modifier = Modifier
+                        .size(76.dp)
+                        .graphicsLayer(scaleX = ringScale, scaleY = ringScale)
+                        .border(2.dp, NeonCyan.copy(alpha = ringAlpha), CircleShape)
+                )
+                Text("🔍", fontSize = 24.sp)
+            }
+        }
+
+        // ── Bottom Panel Translation Console (Only visible when frozen/scanned) ──
         AnimatedVisibility(
-            visible = scanState is OcrScanState.TextDetected || !isLiveScan,
+            visible = !isLiveScan,
             enter   = slideInVertically(initialOffsetY = { it }) + fadeIn(),
             exit    = slideOutVertically(targetOffsetY  = { it }) + fadeOut(),
             modifier = Modifier.align(Alignment.BottomCenter)
@@ -231,12 +268,14 @@ fun OcrTranslatorScreen(
 
 @Composable
 private fun OcrCameraPreview(
-    modifier: Modifier,
-    onCameraReady: (Camera) -> Unit,
-    onFrame: (android.media.Image, Int, Int, Int) -> Unit
+    modifier:             Modifier,
+    onCameraReady:        (Camera) -> Unit,
+    onPreviewViewCreated: (PreviewView) -> Unit,
+    onFrame:              suspend (android.media.Image, Int, Int, Int) -> Unit
 ) {
     val context        = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val scope          = rememberCoroutineScope()
     val executor       = remember { Executors.newSingleThreadExecutor() }
     val processing     = remember { AtomicBoolean(false) }
 
@@ -250,6 +289,7 @@ private fun OcrCameraPreview(
                 )
                 scaleType = PreviewView.ScaleType.FILL_CENTER
             }
+            onPreviewViewCreated(preview)
             val future = ProcessCameraProvider.getInstance(ctx)
             future.addListener({
                 val provider   = future.get()
@@ -266,10 +306,17 @@ private fun OcrCameraPreview(
                 analysisUC.setAnalyzer(executor) { proxy ->
                     val img = proxy.image
                     if (img != null && processing.compareAndSet(false, true)) {
-                        onFrame(img, proxy.imageInfo.rotationDegrees, img.width, img.height)
-                        processing.set(false)
+                        scope.launch {
+                            try {
+                                onFrame(img, proxy.imageInfo.rotationDegrees, img.width, img.height)
+                            } finally {
+                                proxy.close()
+                                processing.set(false)
+                            }
+                        }
+                    } else {
+                        proxy.close()
                     }
-                    proxy.close()
                 }
 
                 val cam = provider.bindToLifecycle(
@@ -290,9 +337,9 @@ private fun OcrCameraPreview(
 
 @Composable
 private fun ResizableSelectorViewfinder(
-    rect: Rect,
+    rect:         Rect,
     onRectChange: (Rect) -> Unit,
-    modifier: Modifier = Modifier
+    modifier:     Modifier = Modifier
 ) {
     val handleSize = 44.dp
     val strokeWidth = 2.5.dp
@@ -300,6 +347,20 @@ private fun ResizableSelectorViewfinder(
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val widthPx = constraints.maxWidth.toFloat()
         val heightPx = constraints.maxHeight.toFloat()
+
+        // Draggable box translation (moving the entire viewfinder crop rect)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(rect) {
+                    detectDragGestures { change, dragAmount ->
+                        change.consume()
+                        val newLeft = (rect.left + dragAmount.x).coerceIn(10f, widthPx - rect.width - 10f)
+                        val newTop = (rect.top + dragAmount.y).coerceIn(80f, heightPx - rect.height - 180f)
+                        onRectChange(Rect(newLeft, newTop, newLeft + rect.width, newTop + rect.height))
+                    }
+                }
+        )
 
         Canvas(modifier = Modifier.fillMaxSize()) {
             // Cutout overlay
@@ -327,7 +388,7 @@ private fun ResizableSelectorViewfinder(
             )
         }
 
-        // Draggable corner selection handles (styled inside active Neon Pink/Blue)
+        // Draggable corner selection handles
         // Top-Left corner
         Box(
             modifier = Modifier
@@ -420,14 +481,16 @@ private fun ResizableSelectorViewfinder(
 
 @Composable
 private fun TextSelectorOverlay(
-    blocks: List<RecognizedBlock>,
-    selectedBlock: RecognizedBlock?,
-    viewfinderLeft: Float,
-    viewfinderTop: Float,
-    viewfinderRight: Float,
+    blocks:           List<RecognizedBlock>,
+    selectedBlock:    RecognizedBlock?,
+    frameWidth:       Int,
+    frameHeight:      Int,
+    viewfinderLeft:   Float,
+    viewfinderTop:    Float,
+    viewfinderRight:  Float,
     viewfinderBottom: Float,
-    onBlockClick: (RecognizedBlock?) -> Unit,
-    modifier: Modifier
+    onBlockClick:     (RecognizedBlock?) -> Unit,
+    modifier:         Modifier
 ) {
     val highlightAlpha by animateFloatAsState(
         targetValue  = if (blocks.isEmpty()) 0f else 0.85f,
@@ -446,6 +509,7 @@ private fun TextSelectorOverlay(
 
     var canvasWidth by remember { mutableStateOf(1) }
     var canvasHeight by remember { mutableStateOf(1) }
+    val density = LocalDensity.current
 
     Canvas(
         modifier = modifier
@@ -453,15 +517,27 @@ private fun TextSelectorOverlay(
                 canvasWidth = coordinates.size.width
                 canvasHeight = coordinates.size.height
             }
-            .pointerInput(blocks) {
+            .pointerInput(blocks, frameWidth, frameHeight) {
                 detectTapGestures { offset ->
-                    val normX = offset.x / canvasWidth
-                    val normY = offset.y / canvasHeight
+                    val screenW = canvasWidth.toFloat()
+                    val screenH = canvasHeight.toFloat()
+                    val frameW = frameWidth.toFloat().coerceAtLeast(1f)
+                    val frameH = frameHeight.toFloat().coerceAtLeast(1f)
+
+                    val scale = maxOf(screenW / frameW, screenH / frameH)
+                    val scaledW = frameW * scale
+                    val scaledH = frameH * scale
+                    val offsetX = (screenW - scaledW) / 2f
+                    val offsetY = (screenH - scaledH) / 2f
+
+                    // Click coordinates projected back to frame space
+                    val clickXNorm = (offset.x - offsetX) / scaledW
+                    val clickYNorm = (offset.y - offsetY) / scaledH
 
                     // Tapping blocks strictly inside viewfinder
                     val clickedBlock = blocks.firstOrNull { block ->
-                        normX >= block.left && normX <= block.right &&
-                        normY >= block.top && normY <= block.bottom &&
+                        clickXNorm >= block.left && clickXNorm <= block.right &&
+                        clickYNorm >= block.top && clickYNorm <= block.bottom &&
                         block.left >= viewfinderLeft && block.right <= viewfinderRight &&
                         block.top >= viewfinderTop && block.bottom <= viewfinderBottom
                     }
@@ -478,10 +554,28 @@ private fun TextSelectorOverlay(
             }
     ) {
         blocks.forEach { block ->
-            val left   = block.left   * size.width
-            val top    = block.top    * size.height
-            val right  = block.right  * size.width
-            val bottom = block.bottom * size.height
+            // Rotated frame dimensions
+            val frameW = frameWidth.toFloat().coerceAtLeast(1f)
+            val frameH = frameHeight.toFloat().coerceAtLeast(1f)
+            
+            // Screen canvas dimensions
+            val screenW = size.width
+            val screenH = size.height
+            
+            // Scale factor for FILL_CENTER projection
+            val scale = maxOf(screenW / frameW, screenH / frameH)
+            val scaledW = frameW * scale
+            val scaledH = frameH * scale
+            
+            // Crop offsets
+            val offsetX = (screenW - scaledW) / 2f
+            val offsetY = (screenH - scaledH) / 2f
+
+            // Transform to screen space
+            val left   = block.left   * scaledW + offsetX
+            val top    = block.top    * scaledH + offsetY
+            val right  = block.right  * scaledW + offsetX
+            val bottom = block.bottom * scaledH + offsetY
             val w = right - left
             val h = bottom - top
 

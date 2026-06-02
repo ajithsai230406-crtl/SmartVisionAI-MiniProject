@@ -78,48 +78,48 @@ class OcrTranslatorViewModel @Inject constructor(
         tts = TextToSpeech(context) { /* init ok */ }
     }
 
-    // ── Called every camera frame (debounced) ─────────────────────────────────
-    fun analyzeFrame(image: Image, rotation: Int, width: Int, height: Int) {
+    // ── Called every camera frame (suspend synchronised) ─────────────────────
+    suspend fun analyzeFrame(image: Image, rotation: Int, width: Int, height: Int) {
         if (!_isLiveScan.value) return
-        analysisJob?.cancel()
-        analysisJob = viewModelScope.launch {
-            delay(300) // debounce - don't process every single frame
-            imageWidth.value  = width
-            imageHeight.value = height
+        imageWidth.value  = width
+        imageHeight.value = height
 
-            ocrRepo.recognizeFromImage(image, rotation)
-                .onSuccess { mlText ->
-                    val domain = mlText.toDomain(width, height)
-                    if (domain.fullText.isBlank()) {
-                        _scanState.value    = OcrScanState.NoText
-                        _overlayBlocks.value = emptyList()
-                    } else {
-                        // Only re-detect language if text changed significantly
-                        val newText = domain.fullText
-                        val enriched = if (newText != lastAnalyzedText) {
-                            lastAnalyzedText = newText
-                            val langCode = langRepo.identifyLanguage(newText)
-                                .getOrDefault("und")
-                            domain.copy(
-                                detectedLanguage     = langCode,
-                                detectedLanguageName = langRepo.languageDisplayName(langCode)
-                            )
-                        } else domain
+        ocrRepo.recognizeFromImage(image, rotation)
+            .onSuccess { mlText ->
+                val domain = mlText.toDomain(width, height, rotation)
+                val frameW = if (rotation == 90 || rotation == 270) height else width
+                val frameH = if (rotation == 90 || rotation == 270) width else height
 
-                        _overlayBlocks.value = enriched.blocks
-                        _scanState.value     = OcrScanState.TextDetected(enriched)
-                    }
+                if (domain.fullText.isBlank()) {
+                    _scanState.value    = OcrScanState.NoText
+                    _overlayBlocks.value = emptyList()
+                } else {
+                    val newText = domain.fullText
+                    val enriched = if (newText != lastAnalyzedText) {
+                        lastAnalyzedText = newText
+                        val langCode = langRepo.identifyLanguage(newText)
+                            .getOrDefault("und")
+                        domain.copy(
+                            detectedLanguage     = langCode,
+                            detectedLanguageName = langRepo.languageDisplayName(langCode)
+                        )
+                    } else domain
+
+                    _overlayBlocks.value = enriched.blocks
+                    _scanState.value     = OcrScanState.TextDetected(enriched, frameW, frameH)
                 }
-                .onFailure { _scanState.value = OcrScanState.Error(it.message ?: "OCR failed") }
-        }
+            }
+            .onFailure { _scanState.value = OcrScanState.Error(it.message ?: "OCR failed") }
     }
 
     /** Freeze current scan (user tapped to capture) */
     fun freezeAndCapture() {
         val current = (_scanState.value as? OcrScanState.TextDetected)?.result ?: return
+        val w       = (_scanState.value as? OcrScanState.TextDetected)?.frameWidth ?: 1080
+        val h       = (_scanState.value as? OcrScanState.TextDetected)?.frameHeight ?: 1920
         _frozenResult.value = current
         _isLiveScan.value   = false
-        _scanState.value    = OcrScanState.TextDetected(current)
+        _scanState.value    = OcrScanState.TextDetected(current, w, h)
     }
 
     /** Resume live scanning */
@@ -143,7 +143,20 @@ class OcrTranslatorViewModel @Inject constructor(
         _selectedBlock.value = null
         ocrRepo.recognizeFromUri(context, uri)
             .onSuccess { mlText ->
-                val domain = mlText.toDomain(100, 100)
+                var w = 1080
+                var h = 1920
+                try {
+                    val options = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    context.contentResolver.openInputStream(uri)?.use { stream ->
+                        android.graphics.BitmapFactory.decodeStream(stream, null, options)
+                    }
+                    if (options.outWidth > 0) w = options.outWidth
+                    if (options.outHeight > 0) h = options.outHeight
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+
+                val domain = mlText.toDomain(w, h, 0)
                 if (domain.fullText.isBlank()) {
                     _scanState.value = OcrScanState.NoText
                 } else {
@@ -154,7 +167,7 @@ class OcrTranslatorViewModel @Inject constructor(
                     )
                     _frozenResult.value = enriched
                     _isLiveScan.value   = false
-                    _scanState.value    = OcrScanState.TextDetected(enriched)
+                    _scanState.value    = OcrScanState.TextDetected(enriched, w, h)
                 }
             }
             .onFailure { _scanState.value = OcrScanState.Error(it.message ?: "Failed to read image") }

@@ -55,6 +55,8 @@ fun WasteClassifierScreen(
     var capturedBmp  by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
 
     val ctx         = LocalContext.current
+    var previewViewRef by remember { mutableStateOf<PreviewView?>(null) }
+    
     val galleryLauncher = rememberGalleryPickerLauncher { uri ->
         viewModel.analyzeFromUri(ctx, uri)
     }
@@ -68,6 +70,7 @@ fun WasteClassifierScreen(
         if (camPerm.status.isGranted && scanState is WasteScanState.Idle) {
             WasteCameraPreview(
                 modifier      = Modifier.fillMaxSize(),
+                onPreviewViewCreated = { previewViewRef = it },
                 onCameraReady = { cameraRef.value = it }
             )
         }
@@ -102,10 +105,9 @@ fun WasteClassifierScreen(
             WasteCaptureButton(
                 modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 80.dp),
                 onCapture = {
-                    // Use a placeholder bitmap for demonstration; in production,
-                    // use ImageCapture use case to capture actual bitmap.
-                    val placeholder = android.graphics.Bitmap.createBitmap(100, 100, android.graphics.Bitmap.Config.ARGB_8888)
-                    viewModel.captureAndClassify(placeholder)
+                    // Capture the actual current live frame from the camera preview view
+                    val bitmap = previewViewRef?.bitmap ?: android.graphics.Bitmap.createBitmap(100, 100, android.graphics.Bitmap.Config.ARGB_8888)
+                    viewModel.captureAndClassify(bitmap)
                 }
             )
         }
@@ -154,7 +156,11 @@ fun WasteClassifierScreen(
 // ══════════════════════════════════════════════════════════════════════════════
 
 @Composable
-private fun WasteCameraPreview(modifier: Modifier, onCameraReady: (Camera) -> Unit) {
+private fun WasteCameraPreview(
+    modifier: Modifier,
+    onPreviewViewCreated: (PreviewView) -> Unit,
+    onCameraReady: (Camera) -> Unit
+) {
     val ctx            = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     AndroidView(modifier = modifier, factory = { c ->
@@ -162,6 +168,7 @@ private fun WasteCameraPreview(modifier: Modifier, onCameraReady: (Camera) -> Un
             layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             scaleType    = PreviewView.ScaleType.FILL_CENTER
         }
+        onPreviewViewCreated(pv)
         ProcessCameraProvider.getInstance(c).addListener({
             val prov    = ProcessCameraProvider.getInstance(c).get()
             val preview = Preview.Builder().build().also { it.setSurfaceProvider(pv.surfaceProvider) }

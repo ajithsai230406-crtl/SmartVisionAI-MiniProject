@@ -153,27 +153,26 @@ fun StudentHelperScreen(
         // ── Top HUD ────────────────────────────────────────────────────────────
         if (scanState is StudentScanState.CameraActive) {
             StudentTopHud(
-                subject = subject,
                 flashEnabled = flashEnabled,
                 onBack = onBack,
-                onSubjectChange = { viewModel.setSubject(it) },
                 onFlashToggle = { viewModel.toggleFlash() },
                 onGalleryPicker = { galleryLauncher() }
             )
         }
 
-        // ── Bottom Capture / Solve Action Button ──────────────────────────────
+        // ── Bottom Controls (Subject Chips + Capture Button) ───────────────────
         if (scanState is StudentScanState.CameraActive && cameraPermission.status.isGranted) {
-            StudentCaptureRow(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(bottom = 40.dp),
+            StudentBottomControls(
+                subject = subject,
+                onSubjectChange = { viewModel.setSubject(it) },
                 onCapture = {
                     captureAndCropPhoto(context, imageCapture, cropRect, canvasWidth, canvasHeight) { croppedBmp ->
                         viewModel.solveCroppedQuestion(croppedBmp)
                     }
-                }
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
             )
         }
 
@@ -304,14 +303,60 @@ private fun ResizableViewfinder(
     onRectChange: (Rect) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val handleSize = 40.dp
-    val strokeWidth = 3.dp
+    val handleSize = 44.dp
+    val thick = 4.dp
+    val rad = 12.dp
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val widthPx = constraints.maxWidth.toFloat()
         val heightPx = constraints.maxHeight.toFloat()
 
-        Canvas(modifier = Modifier.fillMaxSize()) {
+        // Track whether the current touch began inside the crop box for translation drag
+        var isDraggingBox by remember { mutableStateOf(false) }
+
+        val dragTranslationModifier = Modifier.pointerInput(rect) {
+            detectDragGestures(
+                onDragStart = { startOffset ->
+                    isDraggingBox = startOffset.x in rect.left..rect.right &&
+                                    startOffset.y in rect.top..rect.bottom
+                },
+                onDrag = { change, dragAmount ->
+                    if (isDraggingBox) {
+                        change.consume()
+                        val rectWidth = rect.width
+                        val rectHeight = rect.height
+
+                        var newLeft = rect.left + dragAmount.x
+                        var newTop = rect.top + dragAmount.y
+
+                        // Enforce boundaries
+                        if (newLeft < 20f) newLeft = 20f
+                        if (newTop < 120f) newTop = 120f
+
+                        val newRight = newLeft + rectWidth
+                        val newBottom = newTop + rectHeight
+
+                        if (newRight > widthPx - 20f) {
+                            newLeft = widthPx - 20f - rectWidth
+                        }
+                        if (newBottom > heightPx - 220f) {
+                            newTop = heightPx - 220f - rectHeight
+                        }
+
+                        onRectChange(Rect(newLeft, newTop, newLeft + rectWidth, newTop + rectHeight))
+                    }
+                },
+                onDragEnd = {
+                    isDraggingBox = false
+                },
+                onDragCancel = {
+                    isDraggingBox = false
+                }
+            )
+        }
+
+        Canvas(modifier = Modifier.fillMaxSize().then(dragTranslationModifier)) {
+            // Dark transparent mask covering everything except the crop area
             val outerPath = Path().apply {
                 addRect(Rect(0f, 0f, size.width, size.height))
             }
@@ -319,24 +364,68 @@ private fun ResizableViewfinder(
                 addRoundRect(
                     RoundRect(
                         rect = rect,
-                        cornerRadius = CornerRadius(14.dp.toPx(), 14.dp.toPx())
+                        cornerRadius = CornerRadius(rad.toPx(), rad.toPx())
                     )
                 )
             }
             val punchedPath = Path.combine(PathOperation.Difference, outerPath, innerPath)
-            drawPath(punchedPath, Color.Black.copy(alpha = 0.65f))
+            drawPath(punchedPath, Color.Black.copy(alpha = 0.70f))
 
-            // Glowing border
+            // Slim glowing dashed border representing the selection boundary
             drawRoundRect(
-                color = NeonCyan,
+                color = NeonCyan.copy(alpha = 0.45f),
                 topLeft = rect.topLeft,
                 size = rect.size,
-                cornerRadius = CornerRadius(14.dp.toPx(), 14.dp.toPx()),
-                style = Stroke(width = strokeWidth.toPx())
+                cornerRadius = CornerRadius(rad.toPx(), rad.toPx()),
+                style = Stroke(
+                    width = 1.dp.toPx(),
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 12f), 0f)
+                )
             )
+
+            // Draw thick solid cyan brackets at corners matching Google Lens exactly
+            val len = 24.dp.toPx()
+            val thickPx = thick.toPx()
+            val radPx = rad.toPx()
+
+            // Top-Left corner bracket
+            val tlPath = Path().apply {
+                moveTo(rect.left, rect.top + len)
+                lineTo(rect.left, rect.top + radPx)
+                quadraticTo(rect.left, rect.top, rect.left + radPx, rect.top)
+                lineTo(rect.left + len, rect.top)
+            }
+            drawPath(tlPath, NeonCyan, style = Stroke(width = thickPx, cap = StrokeCap.Round))
+
+            // Top-Right corner bracket
+            val trPath = Path().apply {
+                moveTo(rect.right - len, rect.top)
+                lineTo(rect.right - radPx, rect.top)
+                quadraticTo(rect.right, rect.top, rect.right, rect.top + radPx)
+                lineTo(rect.right, rect.top + len)
+            }
+            drawPath(trPath, NeonCyan, style = Stroke(width = thickPx, cap = StrokeCap.Round))
+
+            // Bottom-Left corner bracket
+            val blPath = Path().apply {
+                moveTo(rect.left, rect.bottom - len)
+                lineTo(rect.left, rect.bottom - radPx)
+                quadraticTo(rect.left, rect.bottom, rect.left + radPx, rect.bottom)
+                lineTo(rect.left + len, rect.bottom)
+            }
+            drawPath(blPath, NeonCyan, style = Stroke(width = thickPx, cap = StrokeCap.Round))
+
+            // Bottom-Right corner bracket
+            val brPath = Path().apply {
+                moveTo(rect.right - len, rect.bottom)
+                lineTo(rect.right - radPx, rect.bottom)
+                quadraticTo(rect.right, rect.bottom, rect.right, rect.bottom - radPx)
+                lineTo(rect.right, rect.bottom - len)
+            }
+            drawPath(brPath, NeonCyan, style = Stroke(width = thickPx, cap = StrokeCap.Round))
         }
 
-        // Resizable drag corner handles
+        // Draggable corner handles positioned precisely (invisible handles overlaying on corners)
         // Top-Left
         Box(
             modifier = Modifier
@@ -348,18 +437,12 @@ private fun ResizableViewfinder(
                 .pointerInput(rect) {
                     detectDragGestures { change, dragAmount ->
                         change.consume()
-                        val newLeft = (rect.left + dragAmount.x).coerceAtMost(rect.right - 180f).coerceAtLeast(40f)
-                        val newTop = (rect.top + dragAmount.y).coerceAtMost(rect.bottom - 180f).coerceAtLeast(120f)
+                        val newLeft = (rect.left + dragAmount.x).coerceAtMost(rect.right - 160f).coerceAtLeast(20f)
+                        val newTop = (rect.top + dragAmount.y).coerceAtMost(rect.bottom - 160f).coerceAtLeast(120f)
                         onRectChange(Rect(newLeft, newTop, rect.right, rect.bottom))
                     }
                 }
-        ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val s = size.width
-                drawLine(NeonCyan, Offset(s/2, s/2), Offset(s, s/2), 4.dp.toPx(), StrokeCap.Round)
-                drawLine(NeonCyan, Offset(s/2, s/2), Offset(s/2, s), 4.dp.toPx(), StrokeCap.Round)
-            }
-        }
+        )
 
         // Top-Right
         Box(
@@ -372,18 +455,12 @@ private fun ResizableViewfinder(
                 .pointerInput(rect) {
                     detectDragGestures { change, dragAmount ->
                         change.consume()
-                        val newRight = (rect.right + dragAmount.x).coerceAtLeast(rect.left + 180f).coerceAtMost(widthPx - 40f)
-                        val newTop = (rect.top + dragAmount.y).coerceAtMost(rect.bottom - 180f).coerceAtLeast(120f)
+                        val newRight = (rect.right + dragAmount.x).coerceAtLeast(rect.left + 160f).coerceAtMost(widthPx - 20f)
+                        val newTop = (rect.top + dragAmount.y).coerceAtMost(rect.bottom - 160f).coerceAtLeast(120f)
                         onRectChange(Rect(rect.left, newTop, newRight, rect.bottom))
                     }
                 }
-        ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val s = size.width
-                drawLine(NeonCyan, Offset(s/2, s/2), Offset(0f, s/2), 4.dp.toPx(), StrokeCap.Round)
-                drawLine(NeonCyan, Offset(s/2, s/2), Offset(s/2, s), 4.dp.toPx(), StrokeCap.Round)
-            }
-        }
+        )
 
         // Bottom-Left
         Box(
@@ -396,18 +473,12 @@ private fun ResizableViewfinder(
                 .pointerInput(rect) {
                     detectDragGestures { change, dragAmount ->
                         change.consume()
-                        val newLeft = (rect.left + dragAmount.x).coerceAtMost(rect.right - 180f).coerceAtLeast(40f)
-                        val newBottom = (rect.bottom + dragAmount.y).coerceAtLeast(rect.top + 180f).coerceAtMost(heightPx - 200f)
+                        val newLeft = (rect.left + dragAmount.x).coerceAtMost(rect.right - 160f).coerceAtLeast(20f)
+                        val newBottom = (rect.bottom + dragAmount.y).coerceAtLeast(rect.top + 160f).coerceAtMost(heightPx - 220f)
                         onRectChange(Rect(newLeft, rect.top, rect.right, newBottom))
                     }
                 }
-        ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val s = size.width
-                drawLine(NeonCyan, Offset(s/2, s/2), Offset(s, s/2), 4.dp.toPx(), StrokeCap.Round)
-                drawLine(NeonCyan, Offset(s/2, s/2), Offset(s/2, 0f), 4.dp.toPx(), StrokeCap.Round)
-            }
-        }
+        )
 
         // Bottom-Right
         Box(
@@ -420,18 +491,12 @@ private fun ResizableViewfinder(
                 .pointerInput(rect) {
                     detectDragGestures { change, dragAmount ->
                         change.consume()
-                        val newRight = (rect.right + dragAmount.x).coerceAtLeast(rect.left + 180f).coerceAtMost(widthPx - 40f)
-                        val newBottom = (rect.bottom + dragAmount.y).coerceAtLeast(rect.top + 180f).coerceAtMost(heightPx - 200f)
+                        val newRight = (rect.right + dragAmount.x).coerceAtLeast(rect.left + 160f).coerceAtMost(widthPx - 20f)
+                        val newBottom = (rect.bottom + dragAmount.y).coerceAtLeast(rect.top + 160f).coerceAtMost(heightPx - 220f)
                         onRectChange(Rect(rect.left, rect.top, newRight, newBottom))
                     }
                 }
-        ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val s = size.width
-                drawLine(NeonCyan, Offset(s/2, s/2), Offset(0f, s/2), 4.dp.toPx(), StrokeCap.Round)
-                drawLine(NeonCyan, Offset(s/2, s/2), Offset(s/2, 0f), 4.dp.toPx(), StrokeCap.Round)
-            }
-        }
+        )
     }
 }
 
@@ -469,75 +534,88 @@ private fun ViewfinderTextHighlights(
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// TOP HUD PILLS
+// TOP HUD
 // ══════════════════════════════════════════════════════════════════════════════
 
 @Composable
 private fun StudentTopHud(
-    subject: Subject,
     flashEnabled: Boolean,
     onBack: () -> Unit,
-    onSubjectChange: (Subject) -> Unit,
     onFlashToggle: () -> Unit,
     onGalleryPicker: () -> Unit
 ) {
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .statusBarsPadding()
-            .padding(top = 8.dp)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(Color.Black.copy(alpha = 0.45f))
+                .border(1.dp, Color.White.copy(alpha = 0.15f), CircleShape)
+                .clickable(onClick = onBack),
+            contentAlignment = Alignment.Center
+        ) { Text("←", color = Color.White, fontSize = 18.sp) }
+
+        Text(
+            "Homework Solver",
+            color = Color.White,
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.titleMedium
+        )
+
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Box(
                 modifier = Modifier
-                    .size(36.dp)
+                    .size(40.dp)
                     .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.4f))
-                    .border(1.dp, Color.White.copy(alpha = 0.15f), CircleShape)
-                    .clickable(onClick = onBack),
+                    .background(Color.Black.copy(0.45f))
+                    .border(1.dp, Color.White.copy(0.15f), CircleShape)
+                    .clickable(onClick = onFlashToggle),
                 contentAlignment = Alignment.Center
-            ) { Text("←", color = Color.White) }
+            ) { Text(if (flashEnabled) "⚡" else "🔦", color = Color.White, fontSize = 16.sp) }
 
-            Text(
-                "🎓 Google Lens Homework Mode",
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                style = MaterialTheme.typography.titleMedium
-            )
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color.Black.copy(0.4f))
-                        .border(1.dp, Color.White.copy(0.15f), RoundedCornerShape(10.dp))
-                        .clickable(onClick = onFlashToggle)
-                        .padding(horizontal = 10.dp, vertical = 7.dp)
-                ) { Text(if (flashEnabled) "⚡" else "🔦", color = Color.White) }
-
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color.Black.copy(0.4f))
-                        .border(1.dp, Color.White.copy(0.15f), RoundedCornerShape(10.dp))
-                        .clickable(onClick = onGalleryPicker)
-                        .padding(horizontal = 10.dp, vertical = 7.dp)
-                ) { Text("🖼️", color = Color.White) }
-            }
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(0.45f))
+                    .border(1.dp, Color.White.copy(0.15f), CircleShape)
+                    .clickable(onClick = onGalleryPicker),
+                contentAlignment = Alignment.Center
+            ) { Text("🖼️", color = Color.White, fontSize = 16.sp) }
         }
+    }
+}
 
-        Spacer(Modifier.height(12.dp))
+// ══════════════════════════════════════════════════════════════════════════════
+// BOTTOM CONTROLS (Subject Chips + Capture Button)
+// ══════════════════════════════════════════════════════════════════════════════
 
-        // Horizontal Subject Pills
+@Composable
+private fun StudentBottomControls(
+    subject: Subject,
+    onSubjectChange: (Subject) -> Unit,
+    onCapture: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(bottom = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        // Horizontal subject chips at the bottom
         LazyRow(
             contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth()
         ) {
             items(Subject.values()) { subj ->
                 val isSelected = subj == subject
@@ -545,48 +623,40 @@ private fun StudentTopHud(
                     modifier = Modifier
                         .clip(RoundedCornerShape(20.dp))
                         .background(
-                            if (isSelected) Brush.horizontalGradient(listOf(NeonBlue, NeonCyan))
-                            else Brush.horizontalGradient(listOf(Color.Black.copy(0.40f), Color.Black.copy(0.40f)))
+                            if (isSelected) Brush.horizontalGradient(listOf(NeonCyan.copy(0.25f), NeonBlue.copy(0.25f)))
+                            else Brush.horizontalGradient(listOf(Color.Black.copy(0.5f), Color.Black.copy(0.5f)))
                         )
                         .border(
-                            1.dp,
-                            if (isSelected) NeonCyan else Color.White.copy(alpha = 0.15f),
+                            1.5.dp,
+                            if (isSelected) NeonCyan else Color.White.copy(alpha = 0.2f),
                             RoundedCornerShape(20.dp)
                         )
                         .clickable { onSubjectChange(subj) }
-                        .padding(horizontal = 14.dp, vertical = 7.dp)
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
                 ) {
                     Text(
-                        "${subj.emoji} ${subj.displayName}",
+                        text = "${subj.emoji} ${subj.displayName}",
                         style = MaterialTheme.typography.labelMedium,
                         color = Color.White,
-                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                     )
                 }
             }
         }
-    }
-}
 
-// ══════════════════════════════════════════════════════════════════════════════
-// BOTTOM CAPTURE CONTROLS
-// ══════════════════════════════════════════════════════════════════════════════
-
-@Composable
-private fun StudentCaptureRow(
-    modifier: Modifier,
-    onCapture: () -> Unit
-) {
-    Box(
-        modifier = modifier
-            .size(72.dp)
-            .clip(CircleShape)
-            .background(Brush.radialGradient(listOf(NeonCyan, NeonBlue)))
-            .border(3.dp, Color.White, CircleShape)
-            .clickable(onClick = onCapture),
-        contentAlignment = Alignment.Center
-    ) {
-        Text("🎓", fontSize = 28.sp)
+        // Authentic Google Lens double-circle capture button
+        Box(
+            modifier = Modifier
+                .size(76.dp)
+                .border(4.dp, Color.White, CircleShape)
+                .padding(6.dp)
+                .clip(CircleShape)
+                .background(Color.White)
+                .clickable(onClick = onCapture),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("🎓", fontSize = 28.sp)
+        }
     }
 }
 

@@ -30,6 +30,9 @@ object Routes {
     const val SETTINGS        = "settings"
     const val PROFILE         = "profile"
     const val ABOUT           = "about"
+    const val PRIVACY_POLICY   = "privacy_policy"
+    const val TERMS_CONDITIONS = "terms_conditions"
+    const val ACCESSIBILITY    = "accessibility"
 
     fun ocrResult(text: String) = "ocr_result/$text"
 }
