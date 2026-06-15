@@ -16,6 +16,7 @@ import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions.SCANNER
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import com.smartvision.ai.data.repository.HistoryRepository
+import com.smartvision.ai.data.repository.FirebaseRepository
 import com.smartvision.ai.docscanner.data.DocScannerRepository
 import com.smartvision.ai.docscanner.domain.*
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -29,6 +30,7 @@ import javax.inject.Inject
 class DocScannerViewModel @Inject constructor(
     private val repo:        DocScannerRepository,
     private val historyRepo: HistoryRepository,
+    private val firebase:    FirebaseRepository,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -114,6 +116,23 @@ class DocScannerViewModel @Inject constructor(
                     val saved   = preview.doc.copy(name = name, savedUri = uri, fileSizeKb = sizeKb)
                     _savedDocs.update { listOf(saved) + it }
                     _state.value = DocScanState.Saved(saved, uri)
+                    
+                    // Upload to Firebase Storage and Save to Firestore
+                    val extStr = _exportFormat.value.extension
+                    val uid = firebase.getCurrentUid()
+                    val storagePath = "users/$uid/documents/$name.$extStr"
+                    val uploadResult = firebase.uploadFile(storagePath, uri)
+                    val downloadUrl = uploadResult.getOrNull()
+                    if (downloadUrl != null) {
+                        firebase.saveScannedDocument(
+                            name = name,
+                            downloadUrl = downloadUrl,
+                            fileSizeKb = sizeKb,
+                            pageCount = preview.doc.pageCount,
+                            format = _exportFormat.value.name
+                        )
+                    }
+
                     _toast.value = "✅ Saved: $name.${_exportFormat.value.extension}"
                     historyRepo.save("Document", "📄 $name", "${preview.doc.pageCount} page(s) · ${_exportFormat.value.displayName}")
                 }
@@ -121,19 +140,60 @@ class DocScannerViewModel @Inject constructor(
         }
     }
 
+    private fun getShareableUri(uri: Uri): Uri {
+        if (uri.scheme == "file") {
+            val file = java.io.File(uri.path ?: "")
+            return try {
+                androidx.core.content.FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    file
+                )
+            } catch (e: Exception) {
+                uri
+            }
+        }
+        return uri
+    }
+
     // ── Share ──────────────────────────────────────────────────────────────────
     fun shareDocument(uri: Uri) {
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type    = _exportFormat.value.mimeType
-            putExtra(Intent.EXTRA_STREAM, uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        val mimeType = context.contentResolver.getType(uri) ?: when (uri.path?.substringAfterLast('.')?.lowercase()) {
+            "pdf" -> "application/pdf"
+            "jpg", "jpeg" -> "image/jpeg"
+            "png" -> "image/png"
+            else -> "application/pdf"
         }
-        runCatching { context.startActivity(Intent.createChooser(intent, "Share Document").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        val safeUri = getShareableUri(uri)
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = mimeType
+            putExtra(Intent.EXTRA_STREAM, safeUri)
+            val clipData = android.content.ClipData.newRawUri("Document", safeUri)
+            this.clipData = clipData
+            flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        runCatching {
+            val chooser = Intent.createChooser(intent, "Share Document").apply {
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(chooser)
+        }
     }
 
     // ── Open saved file ────────────────────────────────────────────────────────
     fun openDocument(uri: Uri) {
-        val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+        val mimeType = context.contentResolver.getType(uri) ?: when (uri.path?.substringAfterLast('.')?.lowercase()) {
+            "pdf" -> "application/pdf"
+            "jpg", "jpeg" -> "image/jpeg"
+            "png" -> "image/png"
+            else -> "application/pdf"
+        }
+        val safeUri = getShareableUri(uri)
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(safeUri, mimeType)
+            val clipData = android.content.ClipData.newRawUri("Document", safeUri)
+            this.clipData = clipData
             flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK
         }
         runCatching { context.startActivity(intent) }

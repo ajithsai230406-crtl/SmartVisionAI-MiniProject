@@ -51,6 +51,12 @@ fun VoiceTranslatorScreen(
 
     LaunchedEffect(Unit) { if (!micPerm.status.isGranted) micPerm.launchPermissionRequest() }
 
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel.stopListening()
+        }
+    }
+
     GradientBackground {
         Box(modifier = Modifier.fillMaxSize()) {
 

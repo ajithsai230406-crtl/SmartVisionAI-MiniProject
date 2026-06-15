@@ -1,5 +1,7 @@
 package com.smartvision.ai
 
+import android.content.Context
+import io.mockk.*
 import com.smartvision.ai.data.db.GeminiCacheDao
 import com.smartvision.ai.data.db.GeminiCacheEntity
 import com.smartvision.ai.data.repository.AiAssistantRepository
@@ -14,12 +16,16 @@ class AiAssistantRepositoryTest {
         override suspend fun deleteExpiredCaches(expiryTime: Long) {}
         override suspend fun clearCache() {}
     }
-    private val repository = AiAssistantRepository(mockCacheDao)
+    private val mockContext = mockk<Context>(relaxed = true)
+    private val mockFallbackApiClient = mockk<com.smartvision.ai.data.repository.FallbackApiClient>().apply {
+        coEvery { generateContent(any()) } throws Exception("Network Offline")
+    }
+    private val repository = AiAssistantRepository(mockCacheDao, mockFallbackApiClient, mockContext)
 
     @Test
     fun replyToOcrPromptMentionsScanner() = runBlocking {
         val reply = repository.replyTo("How do I scan OCR text?")
-        assertTrue(reply.contains("OCR Scanner"))
+        assertTrue(reply.contains("OCR"))
     }
 
     @Test

@@ -35,6 +35,10 @@ class SettingsViewModel @Inject constructor(
     val largeButtons = settingsRepository.largeButtons.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     val gesturesEnabled = settingsRepository.gesturesEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     val aiVoiceGuidance = settingsRepository.aiVoiceGuidance.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val recommendationsEnabled = settingsRepository.recommendationsEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+    val quietHoursEnabled = settingsRepository.quietHoursEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+    val quietHoursStart = settingsRepository.quietHoursStart.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 22)
+    val quietHoursEnd = settingsRepository.quietHoursEnd.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 8)
 
     fun setDarkMode(enabled: Boolean) = viewModelScope.launch {
         settingsRepository.setDarkMode(enabled)
@@ -110,6 +114,22 @@ class SettingsViewModel @Inject constructor(
 
     fun setAiVoiceGuidance(enabled: Boolean) = viewModelScope.launch {
         settingsRepository.setAiVoiceGuidance(enabled)
+    }
+
+    fun setRecommendationsEnabled(enabled: Boolean) = viewModelScope.launch {
+        settingsRepository.setRecommendationsEnabled(enabled)
+    }
+
+    fun setQuietHoursEnabled(enabled: Boolean) = viewModelScope.launch {
+        settingsRepository.setQuietHoursEnabled(enabled)
+    }
+
+    fun setQuietHoursStart(hour: Int) = viewModelScope.launch {
+        settingsRepository.setQuietHoursStart(hour)
+    }
+
+    fun setQuietHoursEnd(hour: Int) = viewModelScope.launch {
+        settingsRepository.setQuietHoursEnd(hour)
     }
 }
 

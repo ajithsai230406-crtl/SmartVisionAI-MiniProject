@@ -32,6 +32,9 @@ abstract class UseCaseModule {
     @Binds @Singleton
     abstract fun bindResultRepository(impl: ResultRepositoryImpl): ResultRepository
 
+    @Binds @Singleton
+    abstract fun bindFirebaseRepository(impl: FirebaseRepositoryImpl): FirebaseRepository
+
     // HistoryRepository is a class with @Inject constructor, so it doesn't need a @Binds method.
     // The previous bindHistoryRepository(impl: HistoryRepositoryImpl) was failing because HistoryRepositoryImpl didn't exist.
 }

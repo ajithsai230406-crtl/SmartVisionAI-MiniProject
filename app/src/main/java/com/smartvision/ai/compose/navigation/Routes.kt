@@ -33,6 +33,8 @@ object Routes {
     const val PRIVACY_POLICY   = "privacy_policy"
     const val TERMS_CONDITIONS = "terms_conditions"
     const val ACCESSIBILITY    = "accessibility"
+    const val NOTIFICATION_SETTINGS = "notification_settings"
+    const val ADMIN_DASHBOARD = "admin_dashboard"
 
     fun ocrResult(text: String) = "ocr_result/$text"
 }

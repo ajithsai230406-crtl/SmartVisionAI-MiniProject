@@ -19,5 +19,11 @@ class HistoryViewModel @Inject constructor(
     val history: StateFlow<List<HistoryRecord>> = historyRepository.observeHistory()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    init {
+        viewModelScope.launch {
+            historyRepository.syncFromFirestore()
+        }
+    }
+
     fun clearHistory() = viewModelScope.launch { historyRepository.clear() }
 }

@@ -69,7 +69,7 @@ fun SplashScreen(onFinished: () -> Unit) {
 
     LaunchedEffect(Unit) {
         contentAlpha = 1f
-        delay(3200)
+        delay(2500)
         onFinished()
     }
 
@@ -167,7 +167,7 @@ fun SplashScreen(onFinished: () -> Unit) {
                             )
                         )
                 )
-                // White core with eye emoji
+                // White core with premium vector eye logo
                 Box(
                     modifier = Modifier
                         .size(105.dp)
@@ -184,7 +184,11 @@ fun SplashScreen(onFinished: () -> Unit) {
                         .graphicsLayer(alpha = glowAlpha.coerceIn(0.7f, 1f)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("👁", fontSize = 40.sp)
+                    androidx.compose.foundation.Image(
+                        painter = androidx.compose.ui.res.painterResource(id = com.smartvision.ai.R.drawable.ic_splash_logo),
+                        contentDescription = "App Splash Logo",
+                        modifier = Modifier.size(72.dp)
+                    )
                 }
             }
 
@@ -198,7 +202,7 @@ fun SplashScreen(onFinished: () -> Unit) {
                             color      = Color.White,
                             fontWeight = FontWeight.ExtraBold
                         )
-                    ) { append("SMART ") }
+                    ) { append("Smart ") }
                     withStyle(
                         SpanStyle(
                             brush = Brush.horizontalGradient(
@@ -206,7 +210,7 @@ fun SplashScreen(onFinished: () -> Unit) {
                             ),
                             fontWeight = FontWeight.ExtraBold
                         )
-                    ) { append("VISION AI") }
+                    ) { append("Vision AI") }
                 },
                 style    = MaterialTheme.typography.displayMedium,
                 textAlign = TextAlign.Center
@@ -231,25 +235,20 @@ fun SplashScreen(onFinished: () -> Unit) {
 
             Spacer(Modifier.height(52.dp))
 
-            // ── Get Started Button ─────────────────────────────────────────
-            Box(
-                modifier = Modifier
-                    .width(200.dp)
-                    .height(52.dp)
-                    .clip(RoundedCornerShape(26.dp))
-                    .background(
-                        Brush.horizontalGradient(listOf(NeonBlue, NeonPurple))
-                    )
-                    .clickable { onFinished() },
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    "Get Started",
-                    style      = MaterialTheme.typography.titleSmall,
-                    color      = Color.White,
-                    fontWeight = FontWeight.Bold
-                )
-            }
+            // ── Loading Animation ─────────────────────────────────────────
+            androidx.compose.material3.CircularProgressIndicator(
+                color = NeonCyan,
+                trackColor = NeonPurple.copy(alpha = 0.15f),
+                strokeWidth = 3.dp,
+                modifier = Modifier.size(36.dp)
+            )
+            Spacer(Modifier.height(14.dp))
+            Text(
+                "Initializing AI Core...",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextHint,
+                textAlign = TextAlign.Center
+            )
         }
     }
 }

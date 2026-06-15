@@ -1,8 +1,14 @@
 package com.smartvision.ai.data.db
 
 import androidx.room.*
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.smartvision.ai.data.local.HistoryDao
 import com.smartvision.ai.data.local.HistoryEntity
+import com.smartvision.ai.data.local.OcrScanDao
+import com.smartvision.ai.data.local.OcrScanEntity
+import com.smartvision.ai.data.local.StudentHelperHistoryDao
+import com.smartvision.ai.data.local.StudentHelperHistoryEntity
 import com.smartvision.ai.domain.models.ScanHistoryItem
 import kotlinx.coroutines.flow.Flow
 
@@ -54,17 +60,42 @@ interface ScanHistoryDao {
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Database(
-    entities  = [ScanHistoryEntity::class, HistoryEntity::class, GeminiCacheEntity::class],
-    version   = 2,
+    entities  = [ScanHistoryEntity::class, HistoryEntity::class, GeminiCacheEntity::class, OcrScanEntity::class, StudentHelperHistoryEntity::class],
+    version   = 5,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun scanHistoryDao(): ScanHistoryDao
     abstract fun historyDao(): HistoryDao
     abstract fun geminiCacheDao(): GeminiCacheDao
+    abstract fun ocrScanDao(): OcrScanDao
+    abstract fun studentHelperHistoryDao(): StudentHelperHistoryDao
 
     companion object {
         const val DATABASE_NAME = "smartvision_db"
+
+        /** Migration from v2 → v3: add OCR scan history table */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `ocr_scan_history` (
+                        `id` TEXT NOT NULL PRIMARY KEY,
+                        `timestamp` INTEGER NOT NULL,
+                        `extractedText` TEXT NOT NULL,
+                        `translatedText` TEXT,
+                        `sourceLang` TEXT NOT NULL,
+                        `targetLang` TEXT,
+                        `wordCount` INTEGER NOT NULL,
+                        `characterCount` INTEGER NOT NULL,
+                        `paragraphCount` INTEGER NOT NULL,
+                        `confidence` REAL NOT NULL,
+                        `script` TEXT NOT NULL DEFAULT 'Latin'
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
     }
 }
 

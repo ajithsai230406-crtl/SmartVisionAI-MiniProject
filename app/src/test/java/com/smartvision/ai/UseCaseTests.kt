@@ -1,6 +1,9 @@
 package com.smartvision.ai
 
 import android.graphics.Bitmap
+import com.google.mlkit.vision.barcode.BarcodeScanning
+import com.google.mlkit.vision.objects.ObjectDetection
+import com.google.mlkit.vision.text.TextRecognition
 import com.smartvision.ai.domain.models.*
 import com.smartvision.ai.data.repository.*
 import io.mockk.*
@@ -8,13 +11,7 @@ import kotlinx.coroutines.test.*
 import org.junit.Test
 import org.junit.Assert.*
 import org.junit.Before
-
-// ─────────────────────────────────────────────────────────────────────────────
-// NOTE: Add to app/build.gradle.kts:
-//   testImplementation("io.mockk:mockk:1.13.12")
-//   testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
-//   testImplementation("junit:junit:4.13.2")
-// ─────────────────────────────────────────────────────────────────────────────
+import org.junit.After
 
 class SmartVisionUseCaseTests {
 
@@ -22,9 +19,28 @@ class SmartVisionUseCaseTests {
 
     @Before
     fun setup() {
+        mockkStatic(Bitmap::class)
+        mockkStatic(ObjectDetection::class)
+        mockkStatic(TextRecognition::class)
+        mockkStatic(BarcodeScanning::class)
+
+        // Mock Bitmap static creation
+        every { Bitmap.createBitmap(any<Int>(), any<Int>(), any()) } returns mockk(relaxed = true)
+        every { Bitmap.createScaledBitmap(any(), any(), any(), any()) } returns mockk(relaxed = true)
+
+        // Mock ML Kit client static initializers
+        every { ObjectDetection.getClient(any()) } returns mockk(relaxed = true)
+        every { TextRecognition.getClient(any()) } returns mockk(relaxed = true)
+        every { BarcodeScanning.getClient() } returns mockk(relaxed = true)
+
         bitmap = mockk(relaxed = true)
         every { bitmap.width  } returns 640
         every { bitmap.height } returns 480
+    }
+
+    @After
+    fun teardown() {
+        unmockkAll()
     }
 
     // ── Object Detection ──────────────────────────────────────────────────────
@@ -32,8 +48,6 @@ class SmartVisionUseCaseTests {
     @Test
     fun `DetectObjectsUseCase returns ObjectDetectionResult on success`() = runTest {
         val useCase = DetectObjectsUseCaseImpl()
-        // In real tests you'd mock ML Kit's detector.
-        // Here we verify the result type contract:
         val result = useCase(bitmap)
         assertTrue(
             "Expected ObjectDetectionResult or Error",
@@ -56,7 +70,6 @@ class SmartVisionUseCaseTests {
     fun `ScanQrUseCase returns QrCodeResult or Error on blank bitmap`() = runTest {
         val useCase = ScanQrUseCaseImpl()
         val result  = useCase(bitmap)
-        // Blank bitmap → either no barcode found (Error) or result
         assertTrue(result is ScanResult.QrCodeResult || result is ScanResult.Error)
     }
 
@@ -64,29 +77,47 @@ class SmartVisionUseCaseTests {
 
     @Test
     fun `scaleBitmap keeps dimensions under maxEdge`() {
-        val src    = Bitmap.createBitmap(2048, 1536, Bitmap.Config.ARGB_8888)
-        val scaled = com.smartvision.ai.utils.ImageUtils.scaleBitmap(src, maxEdge = 1024)
-        assertTrue("Width should be ≤ 1024", scaled.width  <= 1024)
-        assertTrue("Height should be ≤ 1024", scaled.height <= 1024)
+        val src = mockk<Bitmap>(relaxed = true)
+        every { src.width } returns 2048
+        every { src.height } returns 1536
+        
+        val scaled = mockk<Bitmap>()
+        every { scaled.width } returns 1024
+        every { scaled.height } returns 768
+        
+        every { Bitmap.createScaledBitmap(src, 1024, 768, true) } returns scaled
+
+        val result = com.smartvision.ai.utils.ImageUtils(mockk(relaxed = true)).scaleBitmap(src, maxSizePx = 1024)
+        assertEquals(scaled, result)
+        assertEquals(1024, result.width)
+        assertEquals(768, result.height)
     }
 
     @Test
     fun `scaleBitmap returns original if already small`() {
-        val src    = Bitmap.createBitmap(640, 480, Bitmap.Config.ARGB_8888)
-        val result = com.smartvision.ai.utils.ImageUtils.scaleBitmap(src, maxEdge = 1024)
-        assertEquals(640, result.width)
-        assertEquals(480, result.height)
+        val src = mockk<Bitmap>(relaxed = true)
+        every { src.width } returns 640
+        every { src.height } returns 480
+        val result = com.smartvision.ai.utils.ImageUtils(mockk(relaxed = true)).scaleBitmap(src, maxSizePx = 1024)
+        assertEquals(src, result)
     }
 
     @Test
     fun `cropNormalized clamps out-of-range floats safely`() {
-        val src     = Bitmap.createBitmap(640, 480, Bitmap.Config.ARGB_8888)
-        // Should not throw even with slightly out-of-range values
-        val cropped = com.smartvision.ai.utils.ImageUtils.cropNormalized(
+        val src = mockk<Bitmap>(relaxed = true)
+        every { src.width } returns 640
+        every { src.height } returns 480
+        
+        val cropped = mockk<Bitmap>()
+        every { cropped.width } returns 640
+        every { cropped.height } returns 480
+        
+        every { Bitmap.createBitmap(src, 0, 0, 640, 480) } returns cropped
+
+        val result = com.smartvision.ai.utils.ImageUtils(mockk(relaxed = true)).cropBitmap(
             src, left = -0.1f, top = -0.1f, right = 1.1f, bottom = 1.1f
         )
-        assertTrue(cropped.width  > 0)
-        assertTrue(cropped.height > 0)
+        assertEquals(cropped, result)
     }
 
     // ── Extensions ────────────────────────────────────────────────────────────
@@ -134,7 +165,8 @@ class SmartVisionUseCaseTests {
     @Test
     fun `ResultRepositoryImpl caches and retrieves result`() = runTest {
         val firestore = mockk<com.google.firebase.firestore.FirebaseFirestore>(relaxed = true)
-        val repo      = ResultRepositoryImpl(firestore)
+        val auth      = mockk<com.google.firebase.auth.FirebaseAuth>(relaxed = true)
+        val repo      = ResultRepositoryImpl(firestore, auth)
         val result    = ScanResult.OcrResult(rawText = "Test text", textBlocks = emptyList())
 
         repo.cacheResult(result)
@@ -146,7 +178,8 @@ class SmartVisionUseCaseTests {
     @Test
     fun `ResultRepositoryImpl caches and retrieves image path`() = runTest {
         val firestore = mockk<com.google.firebase.firestore.FirebaseFirestore>(relaxed = true)
-        val repo      = ResultRepositoryImpl(firestore)
+        val auth      = mockk<com.google.firebase.auth.FirebaseAuth>(relaxed = true)
+        val repo      = ResultRepositoryImpl(firestore, auth)
 
         repo.cacheImagePath("/data/user/0/test.jpg")
         assertEquals("/data/user/0/test.jpg", repo.getCachedImagePath())

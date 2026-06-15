@@ -6,9 +6,11 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.smartvision.ai.medicine.data.MedicineScannerRepository
+import android.graphics.Bitmap
 import com.smartvision.ai.medicine.domain.MedicineInfo
 import com.smartvision.ai.medicine.domain.MedicineScanRecord
 import com.smartvision.ai.medicine.domain.MedicineScanState
+import com.smartvision.ai.medicine.domain.MedicineType
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -35,6 +37,8 @@ class MedicineScannerViewModel @Inject constructor(
     var showDisclaimer   by mutableStateOf(false)
         private set
     var showCamera       by mutableStateOf(false)
+        private set
+    var selectedDirectoryCategory by mutableStateOf<MedicineType?>(null)
         private set
     var isSpeaking       by mutableStateOf(false)
         private set
@@ -86,25 +90,24 @@ class MedicineScannerViewModel @Inject constructor(
         }
     }
 
-    fun analyzeFromOcr(ocrText: String) {
-        if (ocrText.isBlank()) {
-            _state.value = MedicineScanState.Error("No text detected. Try again with a clearer image.")
-            return
-        }
+    fun analyzeFromBitmap(bitmap: Bitmap) {
         analyzeJob?.cancel()
         analyzeJob = viewModelScope.launch {
-            _state.value = MedicineScanState.OcrRunning(0.4f)
-            delay(500)
-            _state.value = MedicineScanState.AiAnalyzing(0.75f)
-            repository.analyzeFromOcrText(ocrText)
-                .onSuccess { info ->
-                    isFavorite = false
-                    showCamera = false
-                    _state.value = MedicineScanState.Result(info)
+            _state.value = MedicineScanState.OcrRunning(0.1f)
+            repository.analyzeFromBitmap(bitmap) { progress ->
+                if (progress <= 0.5f) {
+                    _state.value = MedicineScanState.OcrRunning(progress)
+                } else {
+                    _state.value = MedicineScanState.AiAnalyzing(progress)
                 }
-                .onFailure { e ->
-                    _state.value = MedicineScanState.Error(e.message ?: "OCR analysis failed")
-                }
+            }.onSuccess { info ->
+                isFavorite = false
+                showCamera = false
+                _state.value = MedicineScanState.Result(info)
+            }.onFailure { e ->
+                showCamera = false
+                _state.value = MedicineScanState.Error(e.message ?: "OCR analysis failed")
+            }
         }
     }
 
@@ -159,6 +162,21 @@ class MedicineScannerViewModel @Inject constructor(
     fun closeCamera()      { showCamera = false }
     fun selectTab(t: Int)  { selectedTab = t }
     fun dismissDisclaimer(){ showDisclaimer = false }
+    fun openDirectoryCategory(type: MedicineType) {
+        selectedDirectoryCategory = type
+    }
+
+    fun closeDirectoryCategory() {
+        selectedDirectoryCategory = null
+    }
+
+    fun selectMedicine(info: MedicineInfo) {
+        isFavorite = false
+        stopVoice()
+        selectedDirectoryCategory = null
+        _state.value = MedicineScanState.Result(info)
+    }
+
     fun setLanguage(lang: String) { selectedLanguage = lang }
     fun reset() {
         analyzeJob?.cancel()

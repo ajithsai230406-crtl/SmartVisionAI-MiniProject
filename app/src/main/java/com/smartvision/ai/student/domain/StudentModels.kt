@@ -28,6 +28,12 @@ enum class Subject(val displayName: String, val emoji: String, val systemPrompt:
         "Explain each line. Suggest best practices and common pitfalls. " +
         "Mention time/space complexity for algorithms."
     ),
+    BIOLOGY(
+        "Biology", "🧬",
+        "You are an expert biology tutor. Explain concepts, processes, or anatomical terms step-by-step. " +
+        "Provide scientific naming conventions clearly in plain text. " +
+        "Note interesting biological facts. End with a key concept summary."
+    ),
     GENERAL(
         "General", "🌐",
         "You are a helpful academic tutor. Answer questions clearly and concisely. " +
@@ -83,7 +89,15 @@ object PromptBuilder {
             ExplainMode.PRACTICE -> "Generate 3 practice questions similar to: "
             ExplainMode.SIMPLIFY -> "Explain as if I'm 10 years old: "
         }
+        val constraintInstruction = when (subject) {
+            Subject.MATHEMATICS -> "For Math: You MUST show step-by-step calculations, detailing every mathematical transition, calculation, and simplification."
+            Subject.PHYSICS, Subject.CHEMISTRY, Subject.BIOLOGY -> "For Science: You MUST explain concepts clearly, using real-world analogies, explaining the underlying scientific principles, and defining key terms."
+            Subject.GENERAL -> "For Theory: You MUST provide exam-ready answers, structured with clear definitions, bullet points, and key points suitable for scoring high marks."
+            Subject.PROGRAMMING -> "For Coding: You MUST provide complete, clean, compilable/runnable code, followed by a detailed explanation of the logic and time/space complexity."
+        }
         return """${subject.systemPrompt}
+
+$constraintInstruction
 
 $modeInstruction $question
 

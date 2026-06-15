@@ -40,6 +40,12 @@ fun OcrResultDetailScreen(
     val targetLanguage   by viewModel.targetLanguage.collectAsStateWithLifecycle()
     val ctx              = LocalContext.current
 
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel.stopSpeaking()
+        }
+    }
+
     GradientBackground {
         Column(modifier = Modifier.fillMaxSize()) {
             SmartTopBar(
@@ -59,7 +65,17 @@ fun OcrResultDetailScreen(
                     SourceTextPanel(
                         result      = result,
                         onSpeak     = { viewModel.speak(result.fullText, result.detectedLanguage) },
-                        onCopy      = { copyText(ctx, result.fullText) }
+                        onCopy      = { copyText(ctx, result.fullText) },
+                        onSave      = {
+                            val filename = "SmartVisionAI_OCR_${System.currentTimeMillis() / 1000}.txt"
+                            com.smartvision.ai.utils.FileExportHelper.saveTextFile(ctx, filename, result.fullText)
+                                .onSuccess {
+                                    android.widget.Toast.makeText(ctx, "Exported: $filename to Documents", android.widget.Toast.LENGTH_LONG).show()
+                                }
+                                .onFailure {
+                                    android.widget.Toast.makeText(ctx, "Export failed: ${it.message}", android.widget.Toast.LENGTH_LONG).show()
+                                }
+                        }
                     )
                 }
 
@@ -82,7 +98,17 @@ fun OcrResultDetailScreen(
                     state   = translationState,
                     onSpeak = { text -> viewModel.speak(text) },
                     onCopy  = { text -> copyText(ctx, text) },
-                    onShare = { text -> shareText(ctx, text) }
+                    onShare = { text -> shareText(ctx, text) },
+                    onSave  = { text ->
+                        val filename = "SmartVisionAI_Translation_${System.currentTimeMillis() / 1000}.txt"
+                        com.smartvision.ai.utils.FileExportHelper.saveTextFile(ctx, filename, text)
+                            .onSuccess {
+                                android.widget.Toast.makeText(ctx, "Exported: $filename to Documents", android.widget.Toast.LENGTH_LONG).show()
+                            }
+                            .onFailure {
+                                android.widget.Toast.makeText(ctx, "Export failed: ${it.message}", android.widget.Toast.LENGTH_LONG).show()
+                            }
+                    }
                 )
             }
         }
@@ -94,7 +120,7 @@ fun OcrResultDetailScreen(
 // ──────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun SourceTextPanel(result: OcrResult, onSpeak: () -> Unit, onCopy: () -> Unit) {
+private fun SourceTextPanel(result: OcrResult, onSpeak: () -> Unit, onCopy: () -> Unit, onSave: () -> Unit) {
     val ext = MaterialTheme.extended
     Box(
         modifier = Modifier.fillMaxWidth()
@@ -133,11 +159,12 @@ private fun SourceTextPanel(result: OcrResult, onSpeak: () -> Unit, onCopy: () -
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ActionPill("🔊", onClick = onSpeak)
                     ActionPill("📋", onClick = onCopy)
+                    ActionPill("💾", onClick = onSave)
                 }
             }
 
             Spacer(Modifier.height(10.dp))
-            Divider(color = ext.glassBorder)
+            HorizontalDivider(color = ext.glassBorder)
             Spacer(Modifier.height(10.dp))
 
             // Full text
@@ -275,7 +302,8 @@ private fun FullTranslationPanel(
     state:   TranslationState,
     onSpeak: (String) -> Unit,
     onCopy:  (String) -> Unit,
-    onShare: (String) -> Unit
+    onShare: (String) -> Unit,
+    onSave:  (String) -> Unit
 ) {
     val ext = MaterialTheme.extended
     when (state) {
@@ -329,11 +357,12 @@ private fun FullTranslationPanel(
                             ActionPill("🔊") { onSpeak(state.translatedText) }
                             ActionPill("📋") { onCopy(state.translatedText) }
                             ActionPill("↑")  { onShare(state.translatedText) }
+                            ActionPill("💾") { onSave(state.translatedText) }
                         }
                     }
 
                     Spacer(Modifier.height(12.dp))
-                    Divider(color = ext.glassBorder)
+                    HorizontalDivider(color = ext.glassBorder)
                     Spacer(Modifier.height(12.dp))
 
                     Text(

@@ -15,7 +15,7 @@ class GeminiAssistant {
             "object" in command || "detect" in command ->
                 "Opening object detection with AI bounding boxes."
             else ->
-                "I am your Gemini-powered SmartVision assistant placeholder. Connect your Gemini API key to generate live responses."
+                "I am your OpenRouter-powered SmartVision assistant placeholder. Connect your OpenRouter API key to generate live responses."
         }
     }
 }

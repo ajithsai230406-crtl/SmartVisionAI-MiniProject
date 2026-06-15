@@ -22,17 +22,21 @@ object FirebaseModule {
             val settings = com.google.firebase.firestore.FirebaseFirestoreSettings.Builder()
                 .setLocalCacheSettings(
                     com.google.firebase.firestore.PersistentCacheSettings.newBuilder()
-                        .setSizeBytes(15 * 1024 * 1024) // 15MB local disk cache limit to prevent storage bloat
+                        .setSizeBytes(15 * 1024 * 1024) // 15MB local disk cache limit
                         .build()
                 )
                 .build()
             firestore.firestoreSettings = settings
         } catch (_: Exception) {
-            // Safe fallback if settings are already initialized or configured
+            // Safe fallback if settings are already initialized
         }
         return firestore
     }
 
     @Provides @Singleton
     fun provideStorage(): FirebaseStorage = FirebaseStorage.getInstance()
+
+    // FirebaseDataService, HistoryRepository, AuthRepository are
+    // automatically provided by Hilt via @Inject constructor.
 }
+

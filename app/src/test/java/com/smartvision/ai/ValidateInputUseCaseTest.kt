@@ -10,7 +10,9 @@ class ValidateInputUseCaseTest {
     private lateinit var useCase: ValidateInputUseCase
 
     @Before
-    fun setUp() { useCase = ValidateInputUseCase() }
+    fun setUp() {
+        useCase = ValidateInputUseCase()
+    }
 
     // ── Email validation ──────────────────────────────────────────────────────
 

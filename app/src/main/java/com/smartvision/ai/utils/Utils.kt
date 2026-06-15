@@ -12,21 +12,36 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.resume
 
+import com.smartvision.ai.data.preferences.SettingsRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+
 // ─────────────────────────────────────────────────────────────────────────────
-// TTS MANAGER — singleton wrapper around Android TextToSpeech
+// BASE TTS MANAGER — singleton wrapper around Android TextToSpeech
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Singleton
 class TtsManager @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val settingsRepository: SettingsRepository
 ) {
     private var tts: TextToSpeech? = null
     private var isReady = false
+    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     init {
         tts = TextToSpeech(context) { status ->
             isReady = (status == TextToSpeech.SUCCESS)
             tts?.language = Locale.getDefault()
+            if (isReady) {
+                scope.launch {
+                    settingsRepository.voiceSpeed.collect { speed ->
+                        tts?.setSpeechRate(speed)
+                    }
+                }
+            }
         }
     }
 

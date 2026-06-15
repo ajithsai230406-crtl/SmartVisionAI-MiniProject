@@ -1,18 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+
+    <!-- Outer Scanning Ring -->
     <path
-        android:fillColor="#0B1F3A"
-        android:pathData="M0,0h108v108h-108z" />
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M54,16 A38,38 0 1,1 53.9,16">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="16"
+                android:startY="54"
+                android:endX="92"
+                android:endY="54"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF00D4FF" />
+                <item android:offset="0.5" android:color="#FF007DFF" />
+                <item android:offset="1.0" android:color="#FFBF5FFF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Outer Eye Bracket - Top Left -->
     <path
-        android:fillColor="#5B8CFF"
-        android:pathData="M54,24C36,24 22,38 16,54c6,16 20,30 38,30s32,-14 38,-30C86,38 72,24 54,24zM54,73a19,19 0,1 1,0 -38a19,19 0,0 1,0 38z" />
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M24,44 C28,32 40,26 54,26">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="24"
+                android:startY="35"
+                android:endX="54"
+                android:endY="35"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF00D4FF" />
+                <item android:offset="1.0" android:color="#FF007DFF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Outer Eye Bracket - Bottom Right -->
     <path
-        android:fillColor="#00E5FF"
-        android:pathData="M54,43a11,11 0,1 0,0 22a11,11 0,0 0,0 -22z" />
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M84,64 C80,76 68,82 54,82">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="54"
+                android:startY="73"
+                android:endX="84"
+                android:endY="73"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF007DFF" />
+                <item android:offset="1.0" android:color="#FFBF5FFF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Geometric Scanner Crosshairs -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M59,43a4,4 0,1 0,0 8a4,4 0,0 0,0 -8z" />
+        android:strokeColor="#4000D4FF"
+        android:strokeWidth="1"
+        android:pathData="M54,8 L54,16 M54,92 L54,100 M8,54 L16,54 M92,54 L100,54" />
+
+    <!-- AI Core Iris Ring -->
+    <path
+        android:strokeWidth="3"
+        android:fillColor="#1500D4FF"
+        android:pathData="M54,39 A15,15 0 1,1 53.9,39">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="39"
+                android:startY="54"
+                android:endX="69"
+                android:endY="54"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF00D4FF" />
+                <item android:offset="1.0" android:color="#FFBF5FFF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Pupil Core Glow -->
+    <path
+        android:pathData="M54,46 A8,8 0 1,1 53.9,46">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="46"
+                android:startY="54"
+                android:endX="62"
+                android:endY="54"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FFFFFFFF" />
+                <item android:offset="1.0" android:color="#FF00FFFF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Aperture Shard 1 -->
+    <path
+        android:fillColor="#A0BF5FFF"
+        android:pathData="M48,32 L54,28 L51,35 Z" />
+
+    <!-- Aperture Shard 2 -->
+    <path
+        android:fillColor="#A000D4FF"
+        android:pathData="M60,76 L54,80 L57,73 Z" />
+
 </vector>

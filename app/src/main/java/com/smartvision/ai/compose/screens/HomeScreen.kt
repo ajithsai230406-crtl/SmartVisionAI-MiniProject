@@ -36,15 +36,15 @@ private data class QuickModule(
 )
 
 private val modules = listOf(
-    QuickModule("Object\nDetector",  "🔍", AccentObject,   Routes.OBJECT_DETECTOR_V2),
-    QuickModule("OCR\nTranslator",   "📝", AccentOCR,      Routes.OCR_TRANSLATOR),
-    QuickModule("Student\nHelper",   "📚", AccentStudent,  Routes.STUDENT_HELPER_V2),
-    QuickModule("Waste\nClassifier", "♻️", AccentWaste,    Routes.WASTE_CLASSIFIER_V2),
-    QuickModule("Voice\nTranslator", "🎙️", AccentVoice,    Routes.VOICE_TRANSLATOR_V2),
-    QuickModule("Text\nTranslator",  "🌐", AccentTranslate,Routes.TRANSLATOR_V2),
-    QuickModule("QR\nScanner",       "📷", AccentQR,       Routes.QR_SCANNER_V2),
-    QuickModule("Document\nScanner", "📄", AccentDocument, Routes.DOCUMENT_SCANNER),
-    QuickModule("Medicine\nScanner", "💊", AccentMedicine, Routes.MEDICINE_SCANNER)
+    QuickModule("Object Detector",        "🔍", AccentObject,   Routes.OBJECT_DETECTOR_V2),
+    QuickModule("OCR Translator",         "📝", AccentOCR,      Routes.OCR_TRANSLATOR),
+    QuickModule("AI Student Helper",      "📚", AccentStudent,  Routes.STUDENT_HELPER_V2),
+    QuickModule("Smart Waste Classifier", "♻️", AccentWaste,    Routes.WASTE_CLASSIFIER_V2),
+    QuickModule("Voice Translator",       "🎙️", AccentVoice,    Routes.VOICE_TRANSLATOR_V2),
+    QuickModule("Text Translator",        "🌐", AccentTranslate,Routes.TRANSLATOR_V2),
+    QuickModule("QR & Barcode Scanner",   "📷", AccentQR,       Routes.QR_SCANNER_V2),
+    QuickModule("Smart Document Scanner", "📄", AccentDocument, Routes.DOCUMENT_SCANNER),
+    QuickModule("Medicine Scanner",       "💊", AccentMedicine, Routes.MEDICINE_SCANNER)
 )
 
 private data class DynamicGreeting(
@@ -308,21 +308,20 @@ fun HomeScreen(
 
             item { Spacer(Modifier.height(14.dp)) }
 
-            // ── 3×3 Module Grid — exactly 9 modules, NO AI Assistant ──────
+            // ── 2×5 Module Grid — exactly 9 modules, NO AI Assistant ──────
             item {
                 val filteredModules = if (searchQuery.isBlank()) modules
                 else modules.filter {
-                    it.title.lowercase().replace("\n", " ")
-                        .contains(searchQuery.lowercase())
+                    it.title.lowercase().contains(searchQuery.lowercase())
                 }
 
                 Column(
                     modifier            = Modifier.padding(horizontal = 20.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    filteredModules.chunked(3).forEach { row ->
+                    filteredModules.chunked(2).forEach { row ->
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
                             modifier              = Modifier.fillMaxWidth()
                         ) {
                             row.forEach { module ->
@@ -339,8 +338,8 @@ fun HomeScreen(
                                     modifier    = Modifier.weight(1f)
                                 )
                             }
-                            // Fill empty slots in last row
-                            repeat(3 - row.size) {
+                            // Fill empty slots in last row (aligns odd card at 50% width)
+                            repeat(2 - row.size) {
                                 Spacer(modifier = Modifier.weight(1f))
                             }
                         }

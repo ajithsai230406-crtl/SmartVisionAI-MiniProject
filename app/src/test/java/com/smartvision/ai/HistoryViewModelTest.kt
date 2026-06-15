@@ -1,75 +1,53 @@
 package com.smartvision.ai
 
 import androidx.arch.core.executor.testing.InstantTaskExecutorRule
-import com.smartvision.ai.domain.models.ScanHistoryItem
-import com.smartvision.ai.domain.usecase.ClearHistoryUseCase
-import com.smartvision.ai.domain.usecase.GetHistoryUseCase
-import com.smartvision.ai.ui.screens.HistoryViewModel
+import com.smartvision.ai.data.repository.HistoryRepository
+import com.smartvision.ai.domain.model.HistoryRecord
+import com.smartvision.ai.presentation.history.HistoryViewModel
+import io.mockk.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.test.*
 import org.junit.*
-import org.junit.runner.RunWith
-import org.mockito.Mock
-import org.mockito.Mockito.*
-import org.mockito.junit.MockitoJUnitRunner
 
 @OptIn(ExperimentalCoroutinesApi::class)
-@RunWith(MockitoJUnitRunner::class)
 class HistoryViewModelTest {
 
     @get:Rule val rule = InstantTaskExecutorRule()
     private val dispatcher = UnconfinedTestDispatcher()
 
-    @Mock lateinit var getHistory: GetHistoryUseCase
-    @Mock lateinit var clearHistory: ClearHistoryUseCase
+    private val historyRepository = mockk<HistoryRepository>(relaxed = true)
 
-    private val fakeItems = listOf(
-        ScanHistoryItem("1", moduleType="OCR",     summary="Hello world",       timestampMillis=1_000L),
-        ScanHistoryItem("2", moduleType="Translate",summary="Namaste",          timestampMillis=2_000L),
-        ScanHistoryItem("3", moduleType="OCR",     summary="Second OCR result", timestampMillis=3_000L)
+    private val fakeRecords = listOf(
+        HistoryRecord(1, "OCR", "Title 1", "Details 1", 1000L),
+        HistoryRecord(2, "Chat", "Title 2", "Details 2", 2000L),
+        HistoryRecord(3, "OCR", "Title 3", "Details 3", 3000L)
     )
 
     @Before
     fun setUp() {
         Dispatchers.setMain(dispatcher)
-        `when`(getHistory.invoke()).thenReturn(flowOf(fakeItems))
-        `when`(getHistory.byType("OCR")).thenReturn(flowOf(fakeItems.filter { it.moduleType == "OCR" }))
-        `when`(getHistory.search("Hello")).thenReturn(flowOf(fakeItems.filter { it.summary.contains("Hello") }))
+        every { historyRepository.observeHistory() } returns flowOf(fakeRecords)
     }
 
     @After
-    fun tearDown() { Dispatchers.resetMain() }
-
-    @Test
-    fun `default filter is All and returns all items`() = runTest {
-        val vm = HistoryViewModel(getHistory, clearHistory)
-        vm.historyItems.test {
-            val items = awaitItem()
-            Assert.assertEquals(3, items.size)
-            cancelAndIgnoreRemainingEvents()
-        }
+    fun tearDown() {
+        Dispatchers.resetMain()
     }
 
     @Test
-    fun `filter by OCR returns only OCR items`() = runTest {
-        val vm = HistoryViewModel(getHistory, clearHistory)
-        vm.setFilter("OCR")
-        vm.historyItems.test {
-            val items = awaitItem()
-            Assert.assertTrue(items.all { it.moduleType == "OCR" })
-            cancelAndIgnoreRemainingEvents()
-        }
+    fun `history flow receives repository list`() = runTest {
+        val vm = HistoryViewModel(historyRepository)
+        // Wait for flow collection to emit non-empty list
+        val result = vm.history.first { it.isNotEmpty() }
+        Assert.assertEquals(3, result.size)
+        Assert.assertEquals("Title 1", result[0].title)
     }
 
     @Test
-    fun `search narrows results`() = runTest {
-        val vm = HistoryViewModel(getHistory, clearHistory)
-        vm.setSearch("Hello")
-        vm.historyItems.test {
-            val items = awaitItem()
-            Assert.assertTrue(items.all { it.summary.contains("Hello") })
-            cancelAndIgnoreRemainingEvents()
-        }
+    fun `clearHistory triggers repository clear`() = runTest {
+        val vm = HistoryViewModel(historyRepository)
+        vm.clearHistory()
+        coVerify(exactly = 1) { historyRepository.clear() }
     }
 }

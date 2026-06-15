@@ -2,220 +2,243 @@ package com.smartvision.ai.student.presentation
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.media.Image
+import android.net.Uri
 import android.speech.tts.TextToSpeech
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.smartvision.ai.data.repository.HistoryRepository
+import com.smartvision.ai.data.repository.AuthRepository
+import com.smartvision.ai.data.repository.FirebaseRepository
+import com.smartvision.ai.domain.model.StudyHistoryItem
 import com.smartvision.ai.ocr.data.OcrRecognitionRepository
-import com.smartvision.ai.ocr.domain.RecognizedBlock
-import com.smartvision.ai.ocr.domain.toDomain
 import com.smartvision.ai.student.data.StudentAiRepository
-import com.smartvision.ai.student.domain.*
+import com.smartvision.ai.utils.ImageUtils
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.Locale
 import javax.inject.Inject
 
-sealed class StudentScanState {
-    object CameraActive : StudentScanState()
-    object Solving : StudentScanState()
-    data class Solved(val solution: AiSolution, val croppedImage: Bitmap?) : StudentScanState()
-    data class Error(val message: String) : StudentScanState()
+sealed class StudentUiState {
+    object Idle : StudentUiState()
+    object Loading : StudentUiState()
+    data class Success(val response: String) : StudentUiState()
+    data class Error(val message: String) : StudentUiState()
 }
 
 @HiltViewModel
 class StudentHelperViewModel @Inject constructor(
-    private val aiRepo:      StudentAiRepository,
-    private val ocrRepo:     OcrRecognitionRepository,
-    private val historyRepo: HistoryRepository,
+    private val aiRepo: StudentAiRepository,
+    private val ocrRepo: OcrRecognitionRepository,
+    private val imageUtils: ImageUtils,
+    private val firebaseRepository: FirebaseRepository,
+    private val authRepository: AuthRepository,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
-    // ── Scan State ────────────────────────────────────────────────────────────
-    private val _scanState = MutableStateFlow<StudentScanState>(StudentScanState.CameraActive)
-    val scanState: StateFlow<StudentScanState> = _scanState.asStateFlow()
+    // Unified Ask Question text box state
+    private val _questionText = MutableStateFlow("")
+    val questionText: StateFlow<String> = _questionText.asStateFlow()
 
-    // ── Subject ───────────────────────────────────────────────────────────────
-    private val _subject = MutableStateFlow(Subject.MATHEMATICS)
-    val subject: StateFlow<Subject> = _subject.asStateFlow()
+    // Response and Loading states
+    private val _uiState = MutableStateFlow<StudentUiState>(StudentUiState.Idle)
+    val uiState: StateFlow<StudentUiState> = _uiState.asStateFlow()
 
-    // ── OCR Overlay Blocks ────────────────────────────────────────────────────
-    private val _overlayBlocks = MutableStateFlow<List<RecognizedBlock>>(emptyList())
-    val overlayBlocks: StateFlow<List<RecognizedBlock>> = _overlayBlocks.asStateFlow()
+    // Firestore History states
+    private val _firestoreHistoryList = MutableStateFlow<List<StudyHistoryItem>>(emptyList())
+    val firestoreHistoryList: StateFlow<List<StudyHistoryItem>> = _firestoreHistoryList.asStateFlow()
 
-    // ── Chat & Tutor messages (conversational follow-up inside solved sheet) ──
-    private val _chatMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
-    val chatMessages: StateFlow<List<ChatMessage>> = _chatMessages.asStateFlow()
+    private val _isLoadingHistory = MutableStateFlow(false)
+    val isLoadingHistory: StateFlow<Boolean> = _isLoadingHistory.asStateFlow()
 
-    private val _isThinking = MutableStateFlow(false)
-    val isThinking: StateFlow<Boolean> = _isThinking.asStateFlow()
+    private val _isLastPage = MutableStateFlow(false)
+    val isLastPage: StateFlow<Boolean> = _isLastPage.asStateFlow()
 
-    private val _flashEnabled = MutableStateFlow(false)
-    val flashEnabled: StateFlow<Boolean> = _flashEnabled.asStateFlow()
+    private var lastVisibleTimestamp: Long? = null
 
-    private val _activeTab = MutableStateFlow(StudentTab.SOLUTION)
-    val activeTab: StateFlow<StudentTab> = _activeTab.asStateFlow()
-
-    // TTS Voice Explanation
+    // TTS Engine
     private var tts: TextToSpeech? = null
-    private var ocrJob: Job? = null
 
     init {
-        tts = TextToSpeech(context) { /* tts init */ }
+        tts = TextToSpeech(context) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                tts?.language = Locale.US
+            }
+        }
+        refreshHistory()
     }
 
-    // ── Continual Camera Frame OCR ────────────────────────────────────────────
-    fun analyzeFrame(image: Image, rotation: Int, width: Int, height: Int) {
-        if (_scanState.value !is StudentScanState.CameraActive) return
-        ocrJob?.cancel()
-        ocrJob = viewModelScope.launch {
-            delay(250) // debounce
-            ocrRepo.recognizeFromImage(image, rotation)
-                .onSuccess { text ->
-                    val domain = text.toDomain(width, height)
-                    _overlayBlocks.value = domain.blocks
+    fun updateQuestion(q: String) {
+        _questionText.value = q
+    }
+
+    fun clearAll() {
+        _questionText.value = ""
+        _uiState.value = StudentUiState.Idle
+        stopSpeaking()
+    }
+
+    fun generateAnswer(questionOverride: String? = null) {
+        val finalQuestion = (questionOverride ?: _questionText.value).trim()
+        if (finalQuestion.isBlank()) {
+            _uiState.value = StudentUiState.Error("Empty Question: Please type, scan, or say a question first.")
+            return
+        }
+
+        _uiState.value = StudentUiState.Loading
+
+        viewModelScope.launch {
+            aiRepo.getAiAnswer(finalQuestion)
+                .onSuccess { response ->
+                    _uiState.value = StudentUiState.Success(response)
+                    refreshHistory()
+                }
+                .onFailure { error ->
+                    val errorMsg = error.message ?: "Failed to generate answer."
+                    _uiState.value = StudentUiState.Error(errorMsg)
+                }
+        }
+    }
+
+    // ── OCR processing for camera captures ───────────────────────────────────
+    fun processImageForOcr(bitmap: Bitmap) {
+        _uiState.value = StudentUiState.Loading
+        viewModelScope.launch {
+            ocrRepo.recognizeFromBitmap(bitmap)
+                .onSuccess { recognizedText ->
+                    val cleanText = recognizedText.text.trim()
+                    if (cleanText.isBlank()) {
+                        _uiState.value = StudentUiState.Error("OCR Failed: No readable text detected in captured image.")
+                    } else {
+                        _questionText.value = cleanText
+                        generateAnswer(cleanText)
+                    }
                 }
                 .onFailure {
-                    // Ignore transient live frame OCR failures
+                    _uiState.value = StudentUiState.Error("OCR Failed: Could not process captured image.")
                 }
         }
     }
 
-    // ── Solve Question from Cropped Bitmap ─────────────────────────────────────
-    fun solveCroppedQuestion(bitmap: Bitmap, questionLabel: String = "Scanned Question") {
-        _scanState.value = StudentScanState.Solving
-        _activeTab.value = StudentTab.SOLUTION
-        _chatMessages.value = listOf(
-            ChatMessage(
-                text = "📚 I am analyzing this problem for you step-by-step. Ask me any follow-up questions here!",
-                isUser = false
-            )
-        )
-
+    // ── OCR processing for gallery picker URIs ───────────────────────────────
+    fun processUriForOcr(uri: Uri) {
+        _uiState.value = StudentUiState.Loading
         viewModelScope.launch {
-            aiRepo.askFromImage(bitmap, _subject.value)
-                .onSuccess { solution ->
-                    _scanState.value = StudentScanState.Solved(solution, bitmap)
-                    
-                    // Save to global history repository
-                    historyRepo.save(
-                        "Study",
-                        "Homework Solved (${_subject.value.displayName})",
-                        solution.mainAnswer.take(220)
-                    )
+            ocrRepo.recognizeFromUri(context, uri)
+                .onSuccess { recognizedText ->
+                    val cleanText = recognizedText.text.trim()
+                    if (cleanText.isBlank()) {
+                        _uiState.value = StudentUiState.Error("OCR Failed: No readable text detected in selected image.")
+                    } else {
+                        _questionText.value = cleanText
+                        generateAnswer(cleanText)
+                    }
                 }
-                .onFailure { e ->
-                    _scanState.value = StudentScanState.Error(e.message ?: "Failed to solve question. Try again.")
+                .onFailure {
+                    _uiState.value = StudentUiState.Error("OCR Failed: Could not process gallery image.")
                 }
         }
     }
 
-    // ── Conversational Follow-up Tutor Chat ──────────────────────────────────
-    fun sendTutorChatMessage(text: String) {
-        val msg = text.trim()
-        if (msg.isBlank() || _isThinking.value) return
-
-        val currentState = _scanState.value as? StudentScanState.Solved ?: return
-        val sol = currentState.solution
-
-        _isThinking.value = true
-        // Add user message
-        _chatMessages.update { it + ChatMessage(text = msg, isUser = true) }
-
-        // Add thinking placeholder
-        val thinkingId = System.currentTimeMillis() + 1
-        _chatMessages.update { it + ChatMessage(id = thinkingId, text = "...", isUser = false, isLoading = true) }
-
-        viewModelScope.launch {
-            // Build chat context using the original solution + conversation history
-            aiRepo.chat(
-                userMessage = msg,
-                subject     = _subject.value,
-                history     = _chatMessages.value.filter { it.id != thinkingId }
-            ).onSuccess { response ->
-                _chatMessages.update { it.filter { m -> m.id != thinkingId } + ChatMessage(text = response, isUser = false) }
-            }.onFailure { e ->
-                _chatMessages.update { it.filter { m -> m.id != thinkingId } + ChatMessage(text = "⚠️ Failed: ${e.message}", isUser = false, hasError = true) }
-            }
-            _isThinking.value = false
-        }
+    // ── Text-To-Speech (Read Aloud) ──────────────────────────────────────────
+    fun speak(text: String) {
+        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
     }
 
-    // ── Explain Simply Follow-up ─────────────────────────────────────────────
-    fun explainSolutionSimply() {
-        val currentState = _scanState.value as? StudentScanState.Solved ?: return
-        val sol = currentState.solution
-
-        _isThinking.value = true
-        _activeTab.value = StudentTab.CHAT
-
-        // Add user follow-up text
-        _chatMessages.update { it + ChatMessage(text = "Can you explain this solution in simpler terms?", isUser = true) }
-
-        val thinkingId = System.currentTimeMillis() + 1
-        _chatMessages.update { it + ChatMessage(id = thinkingId, text = "...", isUser = false, isLoading = true) }
-
-        viewModelScope.launch {
-            aiRepo.explainMore(sol.mainAnswer, _subject.value)
-                .onSuccess { simplified ->
-                    _chatMessages.update { it.filter { m -> m.id != thinkingId } + ChatMessage(text = simplified, isUser = false) }
-                }
-                .onFailure { e ->
-                    _chatMessages.update { it.filter { m -> m.id != thinkingId } + ChatMessage(text = "⚠️ ${e.message}", isUser = false, hasError = true) }
-                }
-            _isThinking.value = false
-        }
-    }
-
-    // ── Read Solution Aloud ───────────────────────────────────────────────────
-    fun speakSolution() {
-        val currentState = _scanState.value as? StudentScanState.Solved ?: return
-        val sol = currentState.solution
-
-        val textToSpeak = buildString {
-            append("The main answer is: ${sol.mainAnswer}. ")
-            if (sol.steps.isNotEmpty()) {
-                append("Here are the step by step explanations. ")
-                sol.steps.forEachIndexed { index, step ->
-                    append("Step ${index + 1}: $step. ")
-                }
-            }
-            sol.quickTip?.let { append("Quick tip: $it") }
-        }
-
-        tts?.language = Locale.ENGLISH
-        tts?.speak(textToSpeak, TextToSpeech.QUEUE_FLUSH, null, null)
-    }
-
-    fun toggleFlash() { _flashEnabled.update { !it } }
-
-    fun setSubject(s: Subject) { _subject.value = s }
-
-    fun setTab(t: StudentTab) { _activeTab.value = t }
-
-    fun resetScanner() {
+    fun stopSpeaking() {
         tts?.stop()
-        _scanState.value = StudentScanState.CameraActive
-        _overlayBlocks.value = emptyList()
-        _chatMessages.value = emptyList()
+    }
+
+    // ── Firestore History management ───────────────────────────────────────────
+    fun refreshHistory() {
+        lastVisibleTimestamp = null
+        _isLastPage.value = false
+        _firestoreHistoryList.value = emptyList()
+        loadNextPage()
+    }
+
+    fun loadNextPage() {
+        if (_isLastPage.value || _isLoadingHistory.value) return
+        _isLoadingHistory.value = true
+        
+        viewModelScope.launch {
+            val uid = authRepository.getCurrentUid()
+            firebaseRepository.getStudyHistoryPaginated(uid, limit = 10, lastVisibleTimestamp = lastVisibleTimestamp)
+                .onSuccess { items ->
+                    if (items.isEmpty()) {
+                        _isLastPage.value = true
+                    } else {
+                        lastVisibleTimestamp = items.last().timestamp
+                        _firestoreHistoryList.update { current -> (current + items).distinctBy { it.id } }
+                        if (items.size < 10) {
+                            _isLastPage.value = true
+                        }
+                    }
+                }
+                .onFailure {
+                    // Fail silently or handle error
+                }
+            _isLoadingHistory.value = false
+        }
+    }
+
+    fun reopenHistoryItem(item: StudyHistoryItem) {
+        _questionText.value = item.question
+        _uiState.value = StudentUiState.Success(item.answer)
+        stopSpeaking()
+    }
+
+    fun deleteHistoryItem(id: String) {
+        viewModelScope.launch {
+            firebaseRepository.deleteStudyHistoryItem(id)
+                .onSuccess {
+                    _firestoreHistoryList.update { list -> list.filter { it.id != id } }
+                }
+        }
+    }
+
+    fun clearAllHistory() {
+        viewModelScope.launch {
+            val uid = authRepository.getCurrentUid()
+            firebaseRepository.clearAllStudyHistory(uid)
+                .onSuccess {
+                    _firestoreHistoryList.value = emptyList()
+                    _isLastPage.value = true
+                    lastVisibleTimestamp = null
+                }
+        }
+    }
+
+    fun exportHistory(onResult: (Result<Uri>) -> Unit) {
+        viewModelScope.launch {
+            val list = _firestoreHistoryList.value
+            if (list.isEmpty()) {
+                onResult(Result.failure(Exception("History is empty. Nothing to export.")))
+                return@launch
+            }
+            
+            val textBuilder = java.lang.StringBuilder()
+            textBuilder.append("=== SMART VISION AI - STUDY HISTORY ===\n\n")
+            list.forEach { item ->
+                val dateStr = java.text.SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(
+                    java.util.Date(item.timestamp)
+                )
+                textBuilder.append("Date: $dateStr\n")
+                textBuilder.append("Subject: ${item.subject}\n")
+                textBuilder.append("Question: ${item.question}\n")
+                textBuilder.append("Answer:\n${item.answer}\n")
+                textBuilder.append("---------------------------------------\n\n")
+            }
+            
+            val filename = "StudyHistory_${System.currentTimeMillis()}.txt"
+            val result = com.smartvision.ai.utils.FileExportHelper.saveTextFile(context, filename, textBuilder.toString())
+            onResult(result)
+        }
     }
 
     override fun onCleared() {
         super.onCleared()
         tts?.stop()
         tts?.shutdown()
-        ocrJob?.cancel()
     }
-}
-
-enum class StudentTab(val label: String, val emoji: String) {
-    CHAT    ("Chat",     "💬"),
-    SOLUTION("Solution", "📋"),
-    PRACTICE("Practice", "🏋️"),
-    NOTES   ("Notes",    "📓")
 }

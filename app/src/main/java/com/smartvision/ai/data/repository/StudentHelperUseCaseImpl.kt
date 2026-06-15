@@ -1,41 +1,52 @@
 package com.smartvision.ai.data.repository
 
 import android.graphics.Bitmap
-import com.google.ai.client.generativeai.GenerativeModel
-import com.google.ai.client.generativeai.type.content
-import com.smartvision.ai.BuildConfig
 import com.smartvision.ai.domain.models.ScanResult
 import com.smartvision.ai.domain.usecase.StudentHelperUseCase
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class StudentHelperUseCaseImpl @Inject constructor() : StudentHelperUseCase {
-
-    private val model by lazy {
-        GenerativeModel(modelName = "gemini-1.5-flash", apiKey = BuildConfig.GEMINI_API_KEY)
-    }
+class StudentHelperUseCaseImpl @Inject constructor(
+    private val openRouterManager: OpenRouterManager
+) : StudentHelperUseCase {
 
     override suspend fun invoke(questionBitmap: Bitmap): ScanResult = try {
-        val response = model.generateContent(content {
-            image(questionBitmap)
-            text("You are a helpful tutor. Analyze this question. Provide a clear explanation and step-by-step solution.")
-        })
+        val responseText = openRouterManager.generateContent(
+            prompt = "You are a helpful tutor. Analyze this question. Provide a clear explanation and step-by-step solution.",
+            image = questionBitmap,
+            modelName = "openrouter/auto"
+        )
         ScanResult.StudentHelperResult(
             question      = "From image",
-            aiExplanation = response.text ?: "No response",
+            aiExplanation = responseText,
             steps         = emptyList()
         )
-    } catch (e: Exception) { ScanResult.Error(e.message ?: "AI failed") }
+    } catch (e: Exception) {
+        val offlineMsg = if (e is OpenRouterError.Offline || e is OpenRouterError.NetworkTimeout) {
+            "⚠️ Offline Mode: AI explanation is unavailable. Please check your internet connection and try again."
+        } else {
+            e.message ?: "AI failed"
+        }
+        ScanResult.Error(offlineMsg)
+    }
 
     override suspend fun explainText(text: String): ScanResult = try {
-        val response = model.generateContent(content {
-            text("Explain clearly and step-by-step: $text")
-        })
+        val responseText = openRouterManager.generateContent(
+            prompt = "Explain clearly and step-by-step: $text",
+            modelName = "openrouter/auto"
+        )
         ScanResult.StudentHelperResult(
             question      = text,
-            aiExplanation = response.text ?: "No explanation",
+            aiExplanation = responseText,
             steps         = emptyList()
         )
-    } catch (e: Exception) { ScanResult.Error(e.message ?: "AI failed") }
+    } catch (e: Exception) {
+        val offlineMsg = if (e is OpenRouterError.Offline || e is OpenRouterError.NetworkTimeout) {
+            "⚠️ Offline Mode: AI explanation is unavailable. Please check your internet connection and try again."
+        } else {
+            e.message ?: "AI failed"
+        }
+        ScanResult.Error(offlineMsg)
+    }
 }

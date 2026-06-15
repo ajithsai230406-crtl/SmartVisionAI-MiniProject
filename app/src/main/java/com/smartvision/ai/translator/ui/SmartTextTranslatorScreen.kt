@@ -49,6 +49,12 @@ fun SmartTextTranslatorScreen(
     val keyboard       = LocalSoftwareKeyboardController.current
     val ctx            = LocalContext.current
 
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel.stopSpeaking()
+        }
+    }
+
     GradientBackground {
         Box(modifier = Modifier.fillMaxSize()) {
             Column(modifier = Modifier.fillMaxSize()) {
@@ -111,7 +117,17 @@ fun SmartTextTranslatorScreen(
                                         val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                         cm.setPrimaryClip(ClipData.newPlainText("Translation", s.result.translatedText))
                                     },
-                                    onShare    = { shareText(ctx, s.result.translatedText) }
+                                    onShare    = { shareText(ctx, s.result.translatedText) },
+                                    onSave     = {
+                                        val filename = "SmartVisionAI_Translation_${System.currentTimeMillis() / 1000}.txt"
+                                        com.smartvision.ai.utils.FileExportHelper.saveTextFile(ctx, filename, s.result.translatedText)
+                                            .onSuccess {
+                                                android.widget.Toast.makeText(ctx, "Exported: $filename to Documents", android.widget.Toast.LENGTH_LONG).show()
+                                            }
+                                            .onFailure {
+                                                android.widget.Toast.makeText(ctx, "Export failed: ${it.message}", android.widget.Toast.LENGTH_LONG).show()
+                                            }
+                                    }
                                 )
 
                                 s.result.semanticMeaning?.let { meaning ->
@@ -187,7 +203,7 @@ private fun TranslatorTopBar(onBack: () -> Unit) {
         ) { Text("←", color = MaterialTheme.colorScheme.onSurface) }
         Column {
             Text("🌐 Smart Translator", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold)
-            Text("ML Kit · On-device · Gemini Context", style = MaterialTheme.typography.labelSmall, color = NeonBlue)
+            Text("ML Kit · On-device · AI Context", style = MaterialTheme.typography.labelSmall, color = NeonBlue)
         }
     }
 }
@@ -391,7 +407,8 @@ private fun TranslationResultCard(
     result:  TranslationResult,
     onSpeak: () -> Unit,
     onCopy:  () -> Unit,
-    onShare: () -> Unit
+    onShare: () -> Unit,
+    onSave:  () -> Unit
 ) {
     val ext = MaterialTheme.extended
     Box(
@@ -411,6 +428,7 @@ private fun TranslationResultCard(
                     ActionChip("🔊", onClick = onSpeak)
                     ActionChip("📋", onClick = onCopy)
                     ActionChip("↑", onClick = onShare)
+                    ActionChip("💾", onClick = onSave)
                 }
             }
             HorizontalDivider(color = NeonPurple.copy(0.15f))

@@ -7,9 +7,22 @@ import javax.inject.Inject
 // ── Validation (our addition — no interface conflict) ─────────────────────────
 
 class ValidateInputUseCase @Inject constructor() {
+    private val emailPattern: java.util.regex.Pattern by lazy {
+        runCatching { android.util.Patterns.EMAIL_ADDRESS }.getOrNull()
+            ?: java.util.regex.Pattern.compile(
+                "[a-zA-Z0-9\\+\\.\\_\\%\\-\\+]{1,256}" +
+                "\\@" +
+                "[a-zA-Z0-9][a-zA-Z0-9\\-]{0,64}" +
+                "(" +
+                "\\." +
+                "[a-zA-Z0-9][a-zA-Z0-9\\-]{0,25}" +
+                ")+"
+            )
+    }
+
     fun validateEmail(email: String): ValidationResult {
         if (email.isBlank()) return ValidationResult(false, "Email cannot be empty")
-        if (!android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches())
+        if (!emailPattern.matcher(email).matches())
             return ValidationResult(false, "Enter a valid email address")
         return ValidationResult(true)
     }

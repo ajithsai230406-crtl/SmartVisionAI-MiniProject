@@ -14,17 +14,24 @@ class NetworkMonitor @Inject constructor(
     private val connectivityManager =
         context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
-    /**
-     * Checks if the device has an active internet connection.
-     * Guaranteed safe, thread-safe, and does not leak context.
-     */
     fun isOnline(): Boolean {
         try {
             val activeNetwork = connectivityManager.activeNetwork ?: return false
             val caps = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
-            return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            
+            // Check for internet capability
+            val hasInternet = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            
+            // Check for valid transport types
+            val hasValidTransport = caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                    caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+                    caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) ||
+                    caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+            
+            return hasInternet && hasValidTransport
         } catch (e: Exception) {
-            return false
+            // Default to true to prevent false negatives that block users when they have a working connection
+            return true
         }
     }
 }

@@ -32,11 +32,14 @@ fun SmartVisionNavHost(
     isDarkTheme: Boolean,
     onThemeToggle: () -> Unit
 ) {
+    android.util.Log.d("SmartVision_Nav", "SmartVisionNavHost composition started")
     val navController  = rememberNavController()
     val currentRoute   = navController.currentBackStackEntryAsState().value?.destination?.route
     val authViewModel: AuthViewModel = hiltViewModel()
     val isLoggedIn by authViewModel.isLoggedIn.collectAsState(initial = null)
     val onboardingCompleted by authViewModel.onboardingCompleted.collectAsState(initial = null)
+
+    android.util.Log.d("SmartVision_Nav", "currentRoute=$currentRoute, isLoggedIn=$isLoggedIn, onboardingCompleted=$onboardingCompleted")
 
     // Routes that show the bottom nav bar
     val bottomNavRoutes = setOf(
@@ -53,6 +56,7 @@ fun SmartVisionNavHost(
 
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
+            modifier = Modifier.fillMaxSize(),
             containerColor = Color.Transparent,
             bottomBar = {
                 if (showBottomNav) {
@@ -75,6 +79,7 @@ fun SmartVisionNavHost(
                 navController     = navController,
                 startDestination  = Routes.SPLASH,
                 modifier          = Modifier
+                    .fillMaxSize()
                     .background(DeepNavy)
                     .padding(padding),
                 enterTransition   = {
@@ -92,13 +97,11 @@ fun SmartVisionNavHost(
             ) {
                 // ── Splash ───────────────────────────────────────────────────
                 composable(Routes.SPLASH) {
+                    android.util.Log.d("SmartVision_Nav", "Routes.SPLASH composable block started")
                     SplashScreen(
                         onFinished = {
-                            val target = when {
-                                isLoggedIn == true -> Routes.HOME
-                                onboardingCompleted == true -> Routes.LOGIN
-                                else -> Routes.ONBOARDING
-                            }
+                            val target = authViewModel.getStartDestination()
+                            android.util.Log.d("SmartVision_Nav", "Splash finished, navigating to $target")
                             navController.navigate(target) {
                                 popUpTo(Routes.SPLASH) { inclusive = true }
                             }
@@ -254,7 +257,14 @@ fun SmartVisionNavHost(
                         onBack        = { navController.popBackStack() },
                         isDarkTheme   = isDarkTheme,
                         onThemeToggle = onThemeToggle,
-                        onNavigate    = { route -> navController.navigate(route) }
+                        onNavigate    = { route -> navController.navigate(route) },
+                        onLogout      = {
+                            authViewModel.logout {
+                                navController.navigate(Routes.ONBOARDING) {
+                                    popUpTo(Routes.HOME) { inclusive = true }
+                                }
+                            }
+                        }
                     )
                 }
 
@@ -275,7 +285,7 @@ fun SmartVisionNavHost(
                         onNavigate = { route -> navController.navigate(route) },
                         onLogout = {
                             authViewModel.logout {
-                                navController.navigate(Routes.LOGIN) {
+                                navController.navigate(Routes.ONBOARDING) {
                                     popUpTo(Routes.HOME) { inclusive = true }
                                 }
                             }
@@ -293,6 +303,18 @@ fun SmartVisionNavHost(
                     AccessibilitySettingsScreen(
                         onBack = { navController.popBackStack() }
                     )
+                }
+
+                // ── Notification Settings ──────────────────────────────────
+                composable(Routes.NOTIFICATION_SETTINGS) {
+                    NotificationSettingsScreen(
+                        onBack = { navController.popBackStack() }
+                    )
+                }
+
+                // ── Admin Dashboard ──────────────────────────────────────────
+                composable(Routes.ADMIN_DASHBOARD) {
+                    AdminDashboardScreen(onBack = { navController.popBackStack() })
                 }
             }
         }

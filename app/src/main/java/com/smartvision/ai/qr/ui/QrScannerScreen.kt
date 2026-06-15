@@ -31,6 +31,7 @@ import com.smartvision.ai.compose.components.*
 import com.smartvision.ai.qr.domain.*
 import com.smartvision.ai.qr.presentation.QrScannerViewModel
 import com.smartvision.ai.ui.theme.*
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -196,9 +197,24 @@ private fun QrCameraPreview(
 ) {
     val ctx            = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val executor       = remember { Executors.newSingleThreadExecutor() }
-    val processing     = remember { AtomicBoolean(false) }
+    val executor       = remember { java.util.concurrent.Executors.newSingleThreadExecutor() }
+    val processing     = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
     val scope          = rememberCoroutineScope()
+
+    DisposableEffect(lifecycleOwner) {
+        onDispose {
+            executor.shutdown()
+            val future = ProcessCameraProvider.getInstance(ctx)
+            future.addListener({
+                try {
+                    future.get().unbindAll()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }, ContextCompat.getMainExecutor(ctx))
+        }
+    }
+
     AndroidView(modifier = modifier, factory = { c ->
         val pv = PreviewView(c).apply {
             layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
@@ -211,7 +227,7 @@ private fun QrCameraPreview(
             analysis.setAnalyzer(executor) { proxy ->
                 val img = proxy.image
                 if (img != null && processing.compareAndSet(false, true)) {
-                    scope.launch {
+                    scope.launch(kotlinx.coroutines.Dispatchers.Default) {
                         try {
                             onFrame(img, proxy.imageInfo.rotationDegrees)
                         } catch (e: Exception) {
@@ -230,9 +246,7 @@ private fun QrCameraPreview(
         }, ContextCompat.getMainExecutor(c))
         pv
     })
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
+}// ══════════════════════════════════════════════════════════════════════════════
 // ANIMATED QR FRAME
 // ══════════════════════════════════════════════════════════════════════════════
 

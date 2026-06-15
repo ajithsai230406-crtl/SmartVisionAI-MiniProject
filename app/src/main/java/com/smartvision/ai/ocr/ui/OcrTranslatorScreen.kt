@@ -7,14 +7,21 @@ import android.content.Context
 import android.content.Intent
 import android.view.ViewGroup
 import androidx.camera.core.*
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -27,6 +34,7 @@ import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.*
@@ -36,23 +44,30 @@ import androidx.compose.ui.unit.*
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.accompanist.permissions.*
 import com.smartvision.ai.compose.components.*
+import com.smartvision.ai.data.local.OcrScanEntity
 import com.smartvision.ai.ocr.domain.*
 import com.smartvision.ai.ocr.presentation.OcrTranslatorViewModel
+import com.smartvision.ai.translator.domain.Language
+import com.smartvision.ai.translator.domain.ALL_LANGUAGES
 import com.smartvision.ai.ui.theme.*
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.*
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 private val NeonBlueExact = NeonBlue
 
-// ──────────────────────────────────────────────────────────────────────────────
-// OCR TRANSLATOR — HIGH-FIDELITY GOOGLE LENS TEXT SELECTION SCREEN
-// ──────────────────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// OCR TRANSLATOR — GOOGLE LENS INSPIRED UI
+// ══════════════════════════════════════════════════════════════════════════════
 
-@OptIn(ExperimentalPermissionsApi::class)
+@OptIn(ExperimentalPermissionsApi::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun OcrTranslatorScreen(
     onBack: () -> Unit,
@@ -66,17 +81,36 @@ fun OcrTranslatorScreen(
     val scanState         by viewModel.scanState.collectAsStateWithLifecycle()
     val translationState  by viewModel.translationState.collectAsStateWithLifecycle()
     val overlayBlocks     by viewModel.overlayBlocks.collectAsStateWithLifecycle()
+    val overlayParagraphs by viewModel.overlayParagraphs.collectAsStateWithLifecycle()
     val selectedBlock     by viewModel.selectedBlock.collectAsStateWithLifecycle()
+    val selectedParagraph by viewModel.selectedParagraph.collectAsStateWithLifecycle()
     val frozenResult      by viewModel.frozenResult.collectAsStateWithLifecycle()
     val targetLanguage    by viewModel.targetLanguage.collectAsStateWithLifecycle()
     val isLiveScan        by viewModel.isLiveScan.collectAsStateWithLifecycle()
     val flashEnabled      by viewModel.flashEnabled.collectAsStateWithLifecycle()
-    val cameraRef         = remember { mutableStateOf<Camera?>(null) }
-    val previewViewRef    = remember { mutableStateOf<PreviewView?>(null) }
+    val activeTab         by viewModel.activeTab.collectAsStateWithLifecycle()
+    val detectedScript    by viewModel.detectedScript.collectAsStateWithLifecycle()
+    val scanQuality       by viewModel.scanQuality.collectAsStateWithLifecycle()
+    val scanHistory       by viewModel.scanHistory.collectAsStateWithLifecycle()
 
-    // Sync flash to camera
+    val sourceLanguage    by viewModel.sourceLanguage.collectAsStateWithLifecycle()
+    val ocrMode           by viewModel.ocrMode.collectAsStateWithLifecycle()
+    val blockTranslations by viewModel.blockTranslations.collectAsStateWithLifecycle()
+    val isTranslatingBlocks by viewModel.isTranslatingBlocks.collectAsStateWithLifecycle()
+
+    var showSourcePicker by remember { mutableStateOf(false) }
+
+    val cameraRef      = remember { mutableStateOf<Camera?>(null) }
+    val previewViewRef = remember { mutableStateOf<PreviewView?>(null) }
+
     LaunchedEffect(flashEnabled) {
         cameraRef.value?.cameraControl?.enableTorch(flashEnabled)
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel.stopSpeaking()
+        }
     }
 
     val ctx = LocalContext.current
@@ -84,13 +118,55 @@ fun OcrTranslatorScreen(
         viewModel.analyzeFromGallery(ctx, uri)
     }
 
-    // Google Lens Resizable targeting viewfinder crop box
-    var cropRect by remember { mutableStateOf(Rect(120f, 350f, 960f, 1150f)) }
-    var canvasWidth by remember { mutableStateOf(1) }
+    // Resizable viewfinder crop rect
+    var manualRect by remember { mutableStateOf(Rect(60f, 300f, 1020f, 1100f)) }
+    var canvasWidth  by remember { mutableStateOf(1) }
     var canvasHeight by remember { mutableStateOf(1) }
 
+    val activeState = scanState as? OcrScanState.TextDetected
+    val frameW = activeState?.frameWidth  ?: 1080
+    val frameH = activeState?.frameHeight ?: 1920
+
+    val density = LocalDensity.current
+    val targetRect = remember(selectedBlock, canvasWidth, canvasHeight, frameW, frameH, manualRect) {
+        val block = selectedBlock
+        if (block != null && canvasWidth > 1 && canvasHeight > 1) {
+            val sW = canvasWidth.toFloat(); val sH = canvasHeight.toFloat()
+            val fW = frameW.toFloat().coerceAtLeast(1f); val fH = frameH.toFloat().coerceAtLeast(1f)
+            val scale = maxOf(sW / fW, sH / fH)
+            val ox = (sW - fW * scale) / 2f; val oy = (sH - fH * scale) / 2f
+            val pad = 14.dp.value * density.density
+            Rect(
+                (block.left  * fW * scale + ox - pad).coerceAtLeast(10f),
+                (block.top   * fH * scale + oy - pad).coerceAtLeast(80f),
+                (block.right * fW * scale + ox + pad).coerceAtMost(sW - 10f),
+                (block.bottom* fH * scale + oy + pad).coerceAtMost(sH - 200f)
+            )
+        } else manualRect
+    }
+
+    val animLeft   by animateFloatAsState(targetRect.left,   spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessLow),  label = "l")
+    val animTop    by animateFloatAsState(targetRect.top,    spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessLow),  label = "t")
+    val animRight  by animateFloatAsState(targetRect.right,  spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessLow),  label = "r")
+    val animBottom by animateFloatAsState(targetRect.bottom, spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessLow),  label = "b")
+    val cropRect = Rect(animLeft, animTop, animRight, animBottom)
+
+    val activeBlocks = if (isLiveScan) overlayBlocks else (frozenResult?.blocks ?: emptyList())
+    val insideBlocks = remember(activeBlocks, cropRect, canvasWidth, canvasHeight, frameW, frameH) {
+        if (canvasWidth <= 1 || canvasHeight <= 1) return@remember emptyList<RecognizedBlock>()
+        val sW = canvasWidth.toFloat(); val sH = canvasHeight.toFloat()
+        val fW = frameW.toFloat().coerceAtLeast(1f); val fH = frameH.toFloat().coerceAtLeast(1f)
+        val scale = maxOf(sW / fW, sH / fH)
+        val ox = (sW - fW * scale) / 2f; val oy = (sH - fH * scale) / 2f
+        activeBlocks.filter { b ->
+            val bl = b.left * fW * scale + ox; val bt = b.top * fH * scale + oy
+            val br = b.right * fW * scale + ox; val bb = b.bottom * fH * scale + oy
+            bl < cropRect.right && cropRect.left < br && bt < cropRect.bottom && cropRect.top < bb
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize().background(DeepNavy)) {
-        // ── Camera Preview ───────────────────────────────────────────────────────
+        // ── Camera Preview ───────────────────────────────────────────────────
         if (cameraPermission.status.isGranted) {
             OcrCameraPreview(
                 modifier             = Modifier.fillMaxSize(),
@@ -101,47 +177,34 @@ fun OcrTranslatorScreen(
                 }
             )
 
-            // Resizable dimming background + targeted selector viewfinder box
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .onGloballyPositioned { coords ->
-                        canvasWidth = coords.size.width
-                        canvasHeight = coords.size.height
-                    }
-            ) {
+            // Viewfinder + text overlays
+            Box(modifier = Modifier.fillMaxSize().onGloballyPositioned {
+                canvasWidth  = it.size.width
+                canvasHeight = it.size.height
+            }) {
                 ResizableSelectorViewfinder(
                     rect = cropRect,
-                    onRectChange = { cropRect = it },
+                    onRectChange = { manualRect = it; if (selectedBlock != null) viewModel.selectBlock(null) },
                     modifier = Modifier.fillMaxSize()
                 )
 
-                // Normalized crop bounds to check inside collision blocks
-                val normLeft = cropRect.left / canvasWidth
-                val normTop = cropRect.top / canvasHeight
-                val normRight = cropRect.right / canvasWidth
-                val normBottom = cropRect.bottom / canvasHeight
-
-                val activeBlocks = if (isLiveScan) overlayBlocks else (frozenResult?.blocks ?: emptyList())
-                val activeState = scanState as? OcrScanState.TextDetected
-                val frameW = activeState?.frameWidth ?: 1080
-                val frameH = activeState?.frameHeight ?: 1920
-
-                // Draw detected highlighted text blocks inside viewfinder
-                if (activeBlocks.isNotEmpty()) {
+                if (!isLiveScan && ocrMode == OcrMode.TRANSLATE && blockTranslations.isNotEmpty()) {
+                    GoogleLensTranslateOverlay(
+                        blocks       = insideBlocks,
+                        blockTranslations = blockTranslations,
+                        frameWidth   = frameW,
+                        frameHeight  = frameH,
+                        modifier     = Modifier.fillMaxSize()
+                    )
+                } else if (activeBlocks.isNotEmpty()) {
                     TextSelectorOverlay(
-                        blocks = activeBlocks,
+                        blocks        = activeBlocks,
+                        insideBlocks  = insideBlocks,
                         selectedBlock = selectedBlock,
-                        frameWidth = frameW,
-                        frameHeight = frameH,
-                        viewfinderLeft = normLeft,
-                        viewfinderTop = normTop,
-                        viewfinderRight = normRight,
-                        viewfinderBottom = normBottom,
-                        onBlockClick = { block ->
-                            viewModel.selectBlock(block)
-                        },
-                        modifier = Modifier.fillMaxSize()
+                        frameWidth    = frameW,
+                        frameHeight   = frameH,
+                        onBlockClick  = { viewModel.selectBlock(it) },
+                        modifier      = Modifier.fillMaxSize()
                     )
                 }
             }
@@ -152,119 +215,129 @@ fun OcrTranslatorScreen(
             )
         }
 
-        // ── Top HUD Navigation Bar ──────────────────────────────────────────────
+        // ── Top HUD Bar ──────────────────────────────────────────────────────
         OcrTopBar(
-            onBack        = onBack,
-            flashEnabled  = flashEnabled,
-            isLive        = isLiveScan,
-            onFlash       = { viewModel.toggleFlash() },
-            onGallery     = { galleryLauncher() },
-            onResume      = { viewModel.resumeLiveScan() }
+            onBack       = onBack,
+            flashEnabled = flashEnabled,
+            isLive       = isLiveScan,
+            detectedScript = detectedScript,
+            sourceLanguage = sourceLanguage,
+            onSourceLanguageClick = { showSourcePicker = true },
+            onFlash      = { viewModel.toggleFlash() },
+            onGallery    = { galleryLauncher() },
+            onResume     = { viewModel.resumeLiveScan() }
         )
 
-        // ── Center scan indicators ──────────────────────────────────────────────
-        if (isLiveScan && (scanState is OcrScanState.Idle || scanState is OcrScanState.NoText)) {
-            ScanHintLabel(modifier = Modifier.align(Alignment.Center))
+        // ── Script/Language pill ─────────────────────────────────────────────
+        val liveResult = (scanState as? OcrScanState.TextDetected)?.result
+        if (isLiveScan && liveResult != null) {
+            LiveLanguagePill(
+                langName = liveResult.detectedLanguageName,
+                script   = liveResult.detectedScript,
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 72.dp)
+            )
         }
 
-        // ── Dimming overlay for frozen frames ───────────────────────────────────
-        if (!isLiveScan && frozenResult != null) {
-            FrozenOverlay(modifier = Modifier.fillMaxSize())
-        }
-
-        // ── Dedicated Lens-Style Scan & Translate Pulsing Button ─────────────────
+        // ── Scan hint label ──────────────────────────────────────────────────
         if (isLiveScan) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 32.dp)
-                    .size(76.dp)
-                    .clip(CircleShape)
-                    .background(Color.White)
-                    .border(4.dp, NeonCyan, CircleShape)
-                    .clickable {
-                        viewModel.freezeAndCapture()
-                        viewModel.translateCurrentText()
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                val inf = rememberInfiniteTransition(label = "ringPulse")
-                val ringScale by inf.animateFloat(1f, 1.25f, infiniteRepeatable(tween(1200), RepeatMode.Reverse))
-                val ringAlpha by inf.animateFloat(0.4f, 0f, infiniteRepeatable(tween(1200), RepeatMode.Reverse))
-
-                Box(
-                    modifier = Modifier
-                        .size(76.dp)
-                        .graphicsLayer(scaleX = ringScale, scaleY = ringScale)
-                        .border(2.dp, NeonCyan.copy(alpha = ringAlpha), CircleShape)
-                )
-                Text("🔍", fontSize = 24.sp)
-            }
+            val showWarn = scanState is OcrScanState.NoText || insideBlocks.isEmpty()
+            ScanHintLabel(
+                message   = if (showWarn) "⚠ Point camera towards text" else "🔎 Adjust viewfinder over text",
+                isWarning = showWarn,
+                modifier  = Modifier.align(Alignment.Center)
+            )
         }
 
-        // ── Bottom Panel Translation Console (Only visible when frozen/scanned) ──
-        AnimatedVisibility(
-            visible = !isLiveScan,
-            enter   = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-            exit    = slideOutVertically(targetOffsetY  = { it }) + fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter)
-        ) {
-            val result = (frozenResult ?: (scanState as? OcrScanState.TextDetected)?.result)
-            if (result != null) {
-                // If a specific block is tapped, translate that block. 
-                // Otherwise, automatically aggregate all text blocks falling inside the active viewfinder!
-                val viewfinderText = remember(result, cropRect, canvasWidth, canvasHeight) {
-                    val normLeft = cropRect.left / canvasWidth
-                    val normTop = cropRect.top / canvasHeight
-                    val normRight = cropRect.right / canvasWidth
-                    val normBottom = cropRect.bottom / canvasHeight
+        // ── Frozen overlay dimming ───────────────────────────────────────────
+        if (!isLiveScan && frozenResult != null) {
+            Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(0.30f)))
+        }
 
-                    val targeted = result.blocks.filter { block ->
-                        block.left >= normLeft && block.right <= normRight &&
-                        block.top >= normTop && block.bottom <= normBottom
-                    }
-                    if (targeted.isNotEmpty()) {
-                        targeted.joinToString(" ") { it.text }
-                    } else {
-                        result.fullText
+        // ── Quality ring + Capture button ────────────────────────────────────
+        if (isLiveScan) {
+            QualityCapture(
+                quality    = scanQuality,
+                hasText    = insideBlocks.isNotEmpty(),
+                modifier   = Modifier.align(Alignment.BottomCenter).padding(bottom = 28.dp),
+                onCapture  = {
+                    if (insideBlocks.isEmpty()) viewModel.showError("Point camera towards text")
+                    else {
+                        val bmp = previewViewRef.value?.bitmap
+                        viewModel.freezeAndCapture(bmp)
+                        viewModel.translateCurrentText()
                     }
                 }
+            )
+        }
 
-                val displayText = selectedBlock?.text ?: viewfinderText
+        // ── Bottom Panel (tabs) ──────────────────────────────────────────────
+        AnimatedVisibility(
+            visible  = !isLiveScan,
+            enter    = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit     = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter)
+        ) {
+            val result = frozenResult ?: (scanState as? OcrScanState.TextDetected)?.result
+            if (result != null) {
+                val viewfinderText = insideBlocks.joinToString(" ") { it.text }.ifBlank { result.fullText }
+                val displayText    = selectedParagraph?.text ?: selectedBlock?.text ?: viewfinderText
 
                 OcrBottomPanel(
-                    resultText       = displayText,
-                    detectedLangName = result.detectedLanguageName,
-                    detectedLangCode = result.detectedLanguage,
-                    blockCount       = result.blocks.size,
+                    result           = result,
+                    displayText      = displayText,
                     selectedBlock    = selectedBlock,
-                    onClearSelection = { viewModel.selectBlock(null) },
+                    selectedParagraph = selectedParagraph,
                     translationState = translationState,
                     targetLanguage   = targetLanguage,
                     languages        = viewModel.supportedLanguages,
-                    isLiveScan       = isLiveScan,
-                    onFreeze         = { viewModel.freezeAndCapture() },
+                    activeTab        = activeTab,
+                    scanHistory      = scanHistory,
+                    onTabChange      = { viewModel.setActiveTab(it) },
+                    onClearSelection = { viewModel.selectBlock(null); viewModel.selectParagraph(null) },
                     onTranslate      = { viewModel.translateCurrentText() },
                     onSpeak          = { text, lang -> viewModel.speak(text, lang) },
-                    onLangChange     = { viewModel.setTargetLanguage(it) }
+                    onLangChange     = { viewModel.setTargetLanguage(it) },
+                    onDeleteHistory  = { viewModel.deleteScanFromHistory(it) }
                 )
             }
         }
 
-        // ── Floating Error Alerts ───────────────────────────────────────────────
+        // ── Error Banner ─────────────────────────────────────────────────────
         if (scanState is OcrScanState.Error) {
             OcrErrorBanner(
-                message  = (scanState as OcrScanState.Error).message,
+                message   = (scanState as OcrScanState.Error).message,
                 onDismiss = { viewModel.dismissError() },
                 modifier  = Modifier.align(Alignment.TopCenter).padding(top = 80.dp)
+            )
+        }
+        // ── Mode Selector ────────────────────────────────────────────────────
+        OcrModeSelector(
+            activeMode   = ocrMode,
+            onModeChange = { viewModel.setOcrMode(it) },
+            modifier     = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = if (isLiveScan) 130.dp else 370.dp)
+        )
+
+        // ── Source Language Picker Sheet ─────────────────────────────────────
+        AnimatedVisibility(
+            visible  = showSourcePicker,
+            enter    = slideInVertically { it } + fadeIn(),
+            exit     = slideOutVertically { it } + fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter)
+        ) {
+            OcrSourceLanguagePickerSheet(
+                current   = sourceLanguage,
+                onSelect  = { viewModel.setSourceLanguage(it) },
+                onDismiss = { showSourcePicker = false }
             )
         }
     }
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// CAMERA PREVIEW
-// ──────────────────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// CAMERA PREVIEW — AUTO-FOCUS ENABLED
+// ══════════════════════════════════════════════════════════════════════════════
 
 @Composable
 private fun OcrCameraPreview(
@@ -276,8 +349,22 @@ private fun OcrCameraPreview(
     val context        = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope          = rememberCoroutineScope()
-    val executor       = remember { Executors.newSingleThreadExecutor() }
-    val processing     = remember { AtomicBoolean(false) }
+    val executor       = remember { java.util.concurrent.Executors.newSingleThreadExecutor() }
+    val processing     = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
+
+    DisposableEffect(lifecycleOwner) {
+        onDispose {
+            executor.shutdown()
+            val future = ProcessCameraProvider.getInstance(context)
+            future.addListener({
+                try {
+                    future.get().unbindAll()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }, ContextCompat.getMainExecutor(context))
+        }
+    }
 
     AndroidView(
         modifier = modifier,
@@ -290,15 +377,25 @@ private fun OcrCameraPreview(
                 scaleType = PreviewView.ScaleType.FILL_CENTER
             }
             onPreviewViewCreated(preview)
+
             val future = ProcessCameraProvider.getInstance(ctx)
             future.addListener({
-                val provider   = future.get()
+                val provider = future.get()
                 provider.unbindAll()
 
-                val previewUC  = Preview.Builder().build()
+                val previewUC = Preview.Builder().build()
                     .also { it.setSurfaceProvider(preview.surfaceProvider) }
 
+                val resolutionSelector = ResolutionSelector.Builder()
+                    .setResolutionStrategy(
+                        ResolutionStrategy(
+                            android.util.Size(1920, 1080),
+                            ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+                        )
+                    ).build()
+
                 val analysisUC = ImageAnalysis.Builder()
+                    .setResolutionSelector(resolutionSelector)
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
                     .build()
@@ -306,7 +403,7 @@ private fun OcrCameraPreview(
                 analysisUC.setAnalyzer(executor) { proxy ->
                     val img = proxy.image
                     if (img != null && processing.compareAndSet(false, true)) {
-                        scope.launch {
+                        scope.launch(kotlinx.coroutines.Dispatchers.Default) {
                             try {
                                 onFrame(img, proxy.imageInfo.rotationDegrees, img.width, img.height)
                             } finally {
@@ -324,6 +421,16 @@ private fun OcrCameraPreview(
                     CameraSelector.DEFAULT_BACK_CAMERA,
                     previewUC, analysisUC
                 )
+
+                // ── Enable continuous auto-focus ─────────────────────────────
+                val factory = preview.meteringPointFactory
+                val point   = factory.createPoint(0.5f, 0.5f)
+                val action  = FocusMeteringAction.Builder(point)
+                    .addPoint(point, FocusMeteringAction.FLAG_AE or FocusMeteringAction.FLAG_AWB)
+                    .setAutoCancelDuration(3, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+                cam.cameraControl.startFocusAndMetering(action)
+
                 onCameraReady(cam)
             }, ContextCompat.getMainExecutor(ctx))
             preview
@@ -331,9 +438,9 @@ private fun OcrCameraPreview(
     )
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// GOOGLE LENS RESIZABLE VIEWFINDER CROP TARGET
-// ──────────────────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// RESIZABLE VIEWFINDER
+// ══════════════════════════════════════════════════════════════════════════════
 
 @Composable
 private fun ResizableSelectorViewfinder(
@@ -341,306 +448,244 @@ private fun ResizableSelectorViewfinder(
     onRectChange: (Rect) -> Unit,
     modifier:     Modifier = Modifier
 ) {
-    val handleSize = 44.dp
-    val strokeWidth = 2.5.dp
-
+    val handleSize = 48.dp
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-        val widthPx = constraints.maxWidth.toFloat()
-        val heightPx = constraints.maxHeight.toFloat()
+        val wPx = constraints.maxWidth.toFloat()
+        val hPx = constraints.maxHeight.toFloat()
 
-        // Draggable box translation (moving the entire viewfinder crop rect)
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .pointerInput(rect) {
-                    detectDragGestures { change, dragAmount ->
-                        change.consume()
-                        val newLeft = (rect.left + dragAmount.x).coerceIn(10f, widthPx - rect.width - 10f)
-                        val newTop = (rect.top + dragAmount.y).coerceIn(80f, heightPx - rect.height - 180f)
-                        onRectChange(Rect(newLeft, newTop, newLeft + rect.width, newTop + rect.height))
-                    }
-                }
-        )
+        // Whole-box drag to move
+        Box(modifier = Modifier.fillMaxSize().pointerInput(rect) {
+            detectDragGestures { change, drag ->
+                change.consume()
+                val nl = (rect.left + drag.x).coerceIn(10f, wPx - rect.width - 10f)
+                val nt = (rect.top  + drag.y).coerceIn(80f, hPx - rect.height - 200f)
+                onRectChange(Rect(nl, nt, nl + rect.width, nt + rect.height))
+            }
+        })
 
         Canvas(modifier = Modifier.fillMaxSize()) {
-            // Cutout overlay
-            val outerPath = Path().apply {
-                addRect(Rect(0f, 0f, size.width, size.height))
-            }
-            val innerPath = Path().apply {
-                addRoundRect(
-                    RoundRect(
-                        rect = rect,
-                        cornerRadius = CornerRadius(16.dp.toPx(), 16.dp.toPx())
-                    )
-                )
-            }
-            val punchedPath = Path.combine(PathOperation.Difference, outerPath, innerPath)
-            drawPath(punchedPath, Color.Black.copy(alpha = 0.50f))
+            // Dimming outside
+            val outer = Path().apply { addRect(Rect(0f, 0f, size.width, size.height)) }
+            val inner = Path().apply { addRoundRect(RoundRect(rect, CornerRadius(18.dp.toPx()))) }
+            drawPath(Path.combine(PathOperation.Difference, outer, inner), Color.Black.copy(0.52f))
 
-            // Neon targeted frame border
+            // Animated neon border
             drawRoundRect(
-                color = NeonBlueExact,
-                topLeft = rect.topLeft,
-                size = rect.size,
-                cornerRadius = CornerRadius(16.dp.toPx(), 16.dp.toPx()),
-                style = Stroke(width = strokeWidth.toPx())
+                color        = NeonBlueExact,
+                topLeft      = rect.topLeft,
+                size         = rect.size,
+                cornerRadius = CornerRadius(18.dp.toPx()),
+                style        = Stroke(width = 2.dp.toPx())
             )
-        }
 
-        // Draggable corner selection handles
-        // Top-Left corner
-        Box(
-            modifier = Modifier
-                .offset(x = (rect.left - handleSize.value / 2).dp, y = (rect.top - handleSize.value / 2).dp)
-                .size(handleSize)
-                .pointerInput(rect) {
-                    detectDragGestures { change, dragAmount ->
-                        change.consume()
-                        val newLeft = (rect.left + dragAmount.x).coerceAtMost(rect.right - 180f).coerceAtLeast(30f)
-                        val newTop = (rect.top + dragAmount.y).coerceAtMost(rect.bottom - 180f).coerceAtLeast(100f)
-                        onRectChange(Rect(newLeft, newTop, rect.right, rect.bottom))
-                    }
-                }
-        ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val s = size.width
-                drawLine(NeonPink, Offset(s/2, s/2), Offset(s, s/2), 4.dp.toPx(), StrokeCap.Round)
-                drawLine(NeonPink, Offset(s/2, s/2), Offset(s/2, s), 4.dp.toPx(), StrokeCap.Round)
+            // Corner accent marks
+            val cLen = 22.dp.toPx(); val cStr = 3.5f
+            val p = NeonCyan
+            listOf(
+                Offset(rect.left, rect.top)    to Pair(Offset(rect.left + cLen, rect.top),    Offset(rect.left, rect.top + cLen)),
+                Offset(rect.right, rect.top)   to Pair(Offset(rect.right - cLen, rect.top),   Offset(rect.right, rect.top + cLen)),
+                Offset(rect.left, rect.bottom) to Pair(Offset(rect.left + cLen, rect.bottom), Offset(rect.left, rect.bottom - cLen)),
+                Offset(rect.right, rect.bottom) to Pair(Offset(rect.right - cLen, rect.bottom), Offset(rect.right, rect.bottom - cLen))
+            ).forEach { (corner, lines) ->
+                drawLine(p, corner, lines.first,  cStr, cap = StrokeCap.Round)
+                drawLine(p, corner, lines.second, cStr, cap = StrokeCap.Round)
             }
         }
 
-        // Top-Right corner
-        Box(
-            modifier = Modifier
-                .offset(x = (rect.right - handleSize.value / 2).dp, y = (rect.top - handleSize.value / 2).dp)
-                .size(handleSize)
-                .pointerInput(rect) {
-                    detectDragGestures { change, dragAmount ->
-                        change.consume()
-                        val newRight = (rect.right + dragAmount.x).coerceAtLeast(rect.left + 180f).coerceAtMost(widthPx - 30f)
-                        val newTop = (rect.top + dragAmount.y).coerceAtMost(rect.bottom - 180f).coerceAtLeast(100f)
-                        onRectChange(Rect(rect.left, newTop, newRight, rect.bottom))
-                    }
-                }
-        ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val s = size.width
-                drawLine(NeonPink, Offset(s/2, s/2), Offset(0f, s/2), 4.dp.toPx(), StrokeCap.Round)
-                drawLine(NeonPink, Offset(s/2, s/2), Offset(s/2, s), 4.dp.toPx(), StrokeCap.Round)
-            }
+        // Corner resize handles (invisible hit targets)
+        CornerHandle(rect.left, rect.top, handleSize, rect) { d ->
+            val nl = (rect.left + d.x).coerceAtMost(rect.right - 160f).coerceAtLeast(30f)
+            val nt = (rect.top  + d.y).coerceAtMost(rect.bottom - 160f).coerceAtLeast(100f)
+            onRectChange(Rect(nl, nt, rect.right, rect.bottom))
         }
-
-        // Bottom-Left corner
-        Box(
-            modifier = Modifier
-                .offset(x = (rect.left - handleSize.value / 2).dp, y = (rect.bottom - handleSize.value / 2).dp)
-                .size(handleSize)
-                .pointerInput(rect) {
-                    detectDragGestures { change, dragAmount ->
-                        change.consume()
-                        val newLeft = (rect.left + dragAmount.x).coerceAtMost(rect.right - 180f).coerceAtLeast(30f)
-                        val newBottom = (rect.bottom + dragAmount.y).coerceAtLeast(rect.top + 180f).coerceAtMost(heightPx - 180f)
-                        onRectChange(Rect(newLeft, rect.top, rect.right, newBottom))
-                    }
-                }
-        ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val s = size.width
-                drawLine(NeonPink, Offset(s/2, s/2), Offset(s, s/2), 4.dp.toPx(), StrokeCap.Round)
-                drawLine(NeonPink, Offset(s/2, s/2), Offset(s/2, 0f), 4.dp.toPx(), StrokeCap.Round)
-            }
+        CornerHandle(rect.right, rect.top, handleSize, rect) { d ->
+            val nr = (rect.right + d.x).coerceAtLeast(rect.left + 160f).coerceAtMost(wPx - 30f)
+            val nt = (rect.top   + d.y).coerceAtMost(rect.bottom - 160f).coerceAtLeast(100f)
+            onRectChange(Rect(rect.left, nt, nr, rect.bottom))
         }
-
-        // Bottom-Right corner
-        Box(
-            modifier = Modifier
-                .offset(x = (rect.right - handleSize.value / 2).dp, y = (rect.bottom - handleSize.value / 2).dp)
-                .size(handleSize)
-                .pointerInput(rect) {
-                    detectDragGestures { change, dragAmount ->
-                        change.consume()
-                        val newRight = (rect.right + dragAmount.x).coerceAtLeast(rect.left + 180f).coerceAtMost(widthPx - 30f)
-                        val newBottom = (rect.bottom + dragAmount.y).coerceAtLeast(rect.top + 180f).coerceAtMost(heightPx - 180f)
-                        onRectChange(Rect(rect.left, rect.top, newRight, newBottom))
-                    }
-                }
-        ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val s = size.width
-                drawLine(NeonPink, Offset(s/2, s/2), Offset(0f, s/2), 4.dp.toPx(), StrokeCap.Round)
-                drawLine(NeonPink, Offset(s/2, s/2), Offset(s/2, 0f), 4.dp.toPx(), StrokeCap.Round)
-            }
+        CornerHandle(rect.left, rect.bottom, handleSize, rect) { d ->
+            val nl = (rect.left   + d.x).coerceAtMost(rect.right - 160f).coerceAtLeast(30f)
+            val nb = (rect.bottom + d.y).coerceAtLeast(rect.top + 160f).coerceAtMost(hPx - 200f)
+            onRectChange(Rect(nl, rect.top, rect.right, nb))
+        }
+        CornerHandle(rect.right, rect.bottom, handleSize, rect) { d ->
+            val nr = (rect.right  + d.x).coerceAtLeast(rect.left + 160f).coerceAtMost(wPx - 30f)
+            val nb = (rect.bottom + d.y).coerceAtLeast(rect.top + 160f).coerceAtMost(hPx - 200f)
+            onRectChange(Rect(rect.left, rect.top, nr, nb))
         }
     }
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// TEXT SELECTOR OVERLAY (GOOGLE LENS HIGHLIGHT CANVAS)
-// ──────────────────────────────────────────────────────────────────────────────
+@Composable
+private fun CornerHandle(
+    x: Float,
+    y: Float,
+    handleSize: Dp,
+    rect: Rect,
+    onDrag: (Offset) -> Unit
+) {
+    val density = LocalDensity.current
+    val handleSizePx = with(density) { handleSize.toPx() }
+    Box(modifier = Modifier
+        .offset { IntOffset((x - handleSizePx / 2).toInt(), (y - handleSizePx / 2).toInt()) }
+        .size(handleSize)
+        .pointerInput(rect) {
+            detectDragGestures { c, d -> c.consume(); onDrag(d) }
+        }
+    )
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TEXT SELECTOR OVERLAY
+// ══════════════════════════════════════════════════════════════════════════════
 
 @Composable
 private fun TextSelectorOverlay(
-    blocks:           List<RecognizedBlock>,
-    selectedBlock:    RecognizedBlock?,
-    frameWidth:       Int,
-    frameHeight:      Int,
-    viewfinderLeft:   Float,
-    viewfinderTop:    Float,
-    viewfinderRight:  Float,
-    viewfinderBottom: Float,
-    onBlockClick:     (RecognizedBlock?) -> Unit,
-    modifier:         Modifier
+    blocks:       List<RecognizedBlock>,
+    insideBlocks: List<RecognizedBlock>,
+    selectedBlock: RecognizedBlock?,
+    frameWidth:   Int,
+    frameHeight:  Int,
+    onBlockClick: (RecognizedBlock?) -> Unit,
+    modifier:     Modifier
 ) {
-    val highlightAlpha by animateFloatAsState(
-        targetValue  = if (blocks.isEmpty()) 0f else 0.85f,
-        animationSpec = tween(300),
-        label         = "highlightAlpha"
-    )
+    val haptic = LocalHapticFeedback.current
+    val inf    = rememberInfiniteTransition(label = "pulse")
+    val pulse  by inf.animateFloat(0.4f, 1f, infiniteRepeatable(tween(900), RepeatMode.Reverse), "pulse")
+    val alpha  by animateFloatAsState(if (blocks.isEmpty()) 0f else 0.9f, tween(250), label = "alpha")
 
-    // Pulsing selection indicator
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse_lens")
-    val pulseGlow by infiniteTransition.animateFloat(
-        initialValue  = 0.4f,
-        targetValue   = 1.0f,
-        animationSpec = infiniteRepeatable(tween(1000), RepeatMode.Reverse),
-        label         = "pulseGlow"
-    )
+    var cW by remember { mutableStateOf(1) }
+    var cH by remember { mutableStateOf(1) }
 
-    var canvasWidth by remember { mutableStateOf(1) }
-    var canvasHeight by remember { mutableStateOf(1) }
-    val density = LocalDensity.current
-
-    Canvas(
-        modifier = modifier
-            .onGloballyPositioned { coordinates ->
-                canvasWidth = coordinates.size.width
-                canvasHeight = coordinates.size.height
-            }
-            .pointerInput(blocks, frameWidth, frameHeight) {
-                detectTapGestures { offset ->
-                    val screenW = canvasWidth.toFloat()
-                    val screenH = canvasHeight.toFloat()
-                    val frameW = frameWidth.toFloat().coerceAtLeast(1f)
-                    val frameH = frameHeight.toFloat().coerceAtLeast(1f)
-
-                    val scale = maxOf(screenW / frameW, screenH / frameH)
-                    val scaledW = frameW * scale
-                    val scaledH = frameH * scale
-                    val offsetX = (screenW - scaledW) / 2f
-                    val offsetY = (screenH - scaledH) / 2f
-
-                    // Click coordinates projected back to frame space
-                    val clickXNorm = (offset.x - offsetX) / scaledW
-                    val clickYNorm = (offset.y - offsetY) / scaledH
-
-                    // Tapping blocks strictly inside viewfinder
-                    val clickedBlock = blocks.firstOrNull { block ->
-                        clickXNorm >= block.left && clickXNorm <= block.right &&
-                        clickYNorm >= block.top && clickYNorm <= block.bottom &&
-                        block.left >= viewfinderLeft && block.right <= viewfinderRight &&
-                        block.top >= viewfinderTop && block.bottom <= viewfinderBottom
-                    }
-                    if (clickedBlock != null) {
-                        if (selectedBlock == clickedBlock) {
-                            onBlockClick(null)
-                        } else {
-                            onBlockClick(clickedBlock)
-                        }
-                    } else {
-                        onBlockClick(null)
-                    }
+    Canvas(modifier = modifier
+        .onGloballyPositioned { cW = it.size.width; cH = it.size.height }
+        .pointerInput(blocks, insideBlocks, frameWidth, frameHeight) {
+            detectTapGestures { tap ->
+                val sW = cW.toFloat(); val sH = cH.toFloat()
+                val fW = frameWidth.toFloat().coerceAtLeast(1f); val fH = frameHeight.toFloat().coerceAtLeast(1f)
+                val sc = maxOf(sW / fW, sH / fH)
+                val ox = (sW - fW * sc) / 2f; val oy = (sH - fH * sc) / 2f
+                val nx = (tap.x - ox) / (fW * sc); val ny = (tap.y - oy) / (fH * sc)
+                val hit = blocks.firstOrNull { b ->
+                    nx >= b.left && nx <= b.right && ny >= b.top && ny <= b.bottom && b in insideBlocks
                 }
+                if (hit != null) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onBlockClick(if (hit == selectedBlock) null else hit)
             }
+        }
     ) {
-        blocks.forEach { block ->
-            // Rotated frame dimensions
-            val frameW = frameWidth.toFloat().coerceAtLeast(1f)
-            val frameH = frameHeight.toFloat().coerceAtLeast(1f)
-            
-            // Screen canvas dimensions
-            val screenW = size.width
-            val screenH = size.height
-            
-            // Scale factor for FILL_CENTER projection
-            val scale = maxOf(screenW / frameW, screenH / frameH)
-            val scaledW = frameW * scale
-            val scaledH = frameH * scale
-            
-            // Crop offsets
-            val offsetX = (screenW - scaledW) / 2f
-            val offsetY = (screenH - scaledH) / 2f
+        val fW = frameWidth.toFloat().coerceAtLeast(1f); val fH = frameHeight.toFloat().coerceAtLeast(1f)
+        val sW = size.width; val sH = size.height
+        val sc = maxOf(sW / fW, sH / fH)
+        val ox = (sW - fW * sc) / 2f; val oy = (sH - fH * sc) / 2f
 
-            // Transform to screen space
-            val left   = block.left   * scaledW + offsetX
-            val top    = block.top    * scaledH + offsetY
-            val right  = block.right  * scaledW + offsetX
-            val bottom = block.bottom * scaledH + offsetY
-            val w = right - left
-            val h = bottom - top
+        blocks.forEach { b ->
+            val l = b.left * fW * sc + ox; val t = b.top * fH * sc + oy
+            val r = b.right * fW * sc + ox; val bo = b.bottom * fH * sc + oy
+            val w = r - l; val h = bo - t
 
-            val isInsideViewfinder = block.left >= viewfinderLeft && block.right <= viewfinderRight &&
-                                     block.top >= viewfinderTop && block.bottom <= viewfinderBottom
+            val inside   = b in insideBlocks
+            val selected = b == selectedBlock
+            val base = if (selected) NeonPink else NeonCyan
 
-            val isSelected = selectedBlock == block
-
-            // Render block highlight overlay
-            val baseColor = if (isSelected) NeonPink else NeonCyan
-            val alphaFill = if (isSelected) 0.28f else if (isInsideViewfinder) 0.16f else 0.04f
-            
-            drawRect(
-                color   = baseColor.copy(alpha = alphaFill * highlightAlpha),
-                topLeft = Offset(left, top),
-                size    = Size(w, h)
+            drawRoundRect(
+                color        = base.copy(if (selected) 0.25f * alpha else if (inside) 0.12f * alpha else 0.03f),
+                topLeft      = Offset(l, t),
+                size         = Size(w, h),
+                cornerRadius = CornerRadius(4.dp.toPx())
             )
-
-            // Neon borders for active targeted texts
-            if (isInsideViewfinder || isSelected) {
-                val borderColor = if (isSelected) {
-                    NeonPink.copy(alpha = (0.7f + 0.3f * pulseGlow) * highlightAlpha)
-                } else {
-                    NeonCyan.copy(alpha = 0.5f * highlightAlpha)
-                }
-                val borderWidth = if (isSelected) 2.2f else 1.2f
-
-                drawRect(
-                    color       = borderColor,
-                    topLeft     = Offset(left, top),
-                    size        = Size(w, h),
-                    style       = Stroke(width = borderWidth)
+            if (inside || selected) {
+                drawRoundRect(
+                    color        = base.copy((if (selected) 0.7f + 0.3f * pulse else 0.45f) * alpha),
+                    topLeft      = Offset(l, t),
+                    size         = Size(w, h),
+                    cornerRadius = CornerRadius(4.dp.toPx()),
+                    style        = Stroke(if (selected) 2.5f else 1.3f)
                 )
-
-                // Lens style crop corners around selected text
-                if (isSelected) {
-                    val cLen = (w * 0.15f).coerceAtMost(10f)
-                    val cStr = 2.8f
-                    // TL
-                    drawLine(NeonPink, Offset(left, top + cLen), Offset(left, top), cStr)
-                    drawLine(NeonPink, Offset(left, top), Offset(left + cLen, top), cStr)
-                    // TR
-                    drawLine(NeonPink, Offset(right - cLen, top), Offset(right, top), cStr)
-                    drawLine(NeonPink, Offset(right, top), Offset(right, top + cLen), cStr)
-                    // BL
-                    drawLine(NeonPink, Offset(left, bottom - cLen), Offset(left, bottom), cStr)
-                    drawLine(NeonPink, Offset(left, bottom), Offset(left + cLen, bottom), cStr)
-                    // BR
-                    drawLine(NeonPink, Offset(right - cLen, bottom), Offset(right, bottom), cStr)
-                    drawLine(NeonPink, Offset(right, bottom), Offset(right, bottom - cLen), cStr)
+                if (selected) {
+                    // Corner bracket marks
+                    val cLen = minOf(w * 0.18f, 12f); val cSt = 3f
+                    drawLine(NeonPink, Offset(l, t + cLen), Offset(l, t), cSt, StrokeCap.Round)
+                    drawLine(NeonPink, Offset(l, t), Offset(l + cLen, t), cSt, StrokeCap.Round)
+                    drawLine(NeonPink, Offset(r - cLen, t), Offset(r, t), cSt, StrokeCap.Round)
+                    drawLine(NeonPink, Offset(r, t), Offset(r, t + cLen), cSt, StrokeCap.Round)
+                    drawLine(NeonPink, Offset(l, bo - cLen), Offset(l, bo), cSt, StrokeCap.Round)
+                    drawLine(NeonPink, Offset(l, bo), Offset(l + cLen, bo), cSt, StrokeCap.Round)
+                    drawLine(NeonPink, Offset(r - cLen, bo), Offset(r, bo), cSt, StrokeCap.Round)
+                    drawLine(NeonPink, Offset(r, bo), Offset(r, bo - cLen), cSt, StrokeCap.Round)
                 }
             }
         }
     }
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// TOP APP HUD BAR
-// ──────────────────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// LIVE TRANSLATION OVERLAY (shows translated text floating over detected blocks)
+// ══════════════════════════════════════════════════════════════════════════════
+
+@Composable
+private fun LiveTranslationOverlay(
+    blocks:     List<RecognizedBlock>,
+    translated: String,
+    frameWidth:  Int,
+    frameHeight: Int,
+    modifier:    Modifier
+) {
+    var cW by remember { mutableStateOf(1) }
+    var cH by remember { mutableStateOf(1) }
+    val enter by animateFloatAsState(1f, tween(400), label = "txOverlay")
+
+    Box(modifier = modifier.onGloballyPositioned { cW = it.size.width; cH = it.size.height }) {
+        if (blocks.isEmpty() || cW <= 1) return@Box
+
+        val fW = frameWidth.toFloat().coerceAtLeast(1f); val fH = frameHeight.toFloat().coerceAtLeast(1f)
+        val sW = cW.toFloat(); val sH = cH.toFloat()
+        val sc = maxOf(sW / fW, sH / fH)
+        val ox = (sW - fW * sc) / 2f; val oy = (sH - fH * sc) / 2f
+
+        // Place translation label just above the first (topmost) block
+        val topBlock = blocks.minByOrNull { it.top } ?: return@Box
+        val labelX = topBlock.left * fW * sc + ox
+        val labelY = (topBlock.top * fH * sc + oy - 8.dp.value).coerceAtLeast(120f)
+
+        Box(
+            modifier = Modifier
+                .offset(x = labelX.dp / LocalDensity.current.density, y = labelY.dp / LocalDensity.current.density)
+                .widthIn(max = 280.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(Color(0xE6050816), Color(0xE60A1040))
+                    )
+                )
+                .border(1.dp, NeonPurple.copy(0.6f), RoundedCornerShape(10.dp))
+                .padding(horizontal = 10.dp, vertical = 6.dp)
+                .graphicsLayer(alpha = enter)
+        ) {
+            Text(
+                text       = translated,
+                style      = MaterialTheme.typography.bodySmall,
+                color      = Color.White,
+                fontWeight = FontWeight.Medium,
+                maxLines   = 3,
+                overflow   = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TOP HUD BAR
+// ══════════════════════════════════════════════════════════════════════════════
 
 @Composable
 private fun OcrTopBar(
     onBack: () -> Unit,
     flashEnabled: Boolean,
     isLive: Boolean,
+    detectedScript: String,
+    sourceLanguage: Language,
+    onSourceLanguageClick: () -> Unit,
     onFlash: () -> Unit,
     onGallery: () -> Unit,
     onResume: () -> Unit
@@ -649,31 +694,54 @@ private fun OcrTopBar(
         modifier = Modifier
             .fillMaxWidth()
             .statusBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment     = Alignment.CenterVertically,
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        // Back pill
-        TopBarIcon(icon = "←", onClick = onBack)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            TopBarIcon("←", onClick = onBack)
+            
+            // Source Language Pill Trigger Button
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color.Black.copy(0.55f))
+                    .border(1.dp, Color.White.copy(0.15f), RoundedCornerShape(10.dp))
+                    .clickable(onClick = onSourceLanguageClick)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(sourceLanguage.flag, fontSize = 14.sp)
+                Text(
+                    text = sourceLanguage.displayName,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
+                Text("▼", color = NeonCyan, fontSize = 8.sp)
+            }
+        }
 
-        // Premium Neon HUD Title
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
                 "OCR TRANSLATOR",
-                style      = MaterialTheme.typography.titleMedium,
-                color      = Color.White,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.sp
+                style = MaterialTheme.typography.titleMedium,
+                color = Color.White,
+                fontWeight = FontWeight.ExtraBold,
+                letterSpacing = 1.5.sp
             )
             Text(
-                "Google Lens Text Selection",
+                if (isLive) "● Live Scanning" else "⏸ Frame Captured",
                 style = MaterialTheme.typography.labelSmall,
-                color = NeonCyan,
+                color = if (isLive) NeonGreen else NeonCyan,
                 fontWeight = FontWeight.Medium
             )
         }
 
-        // Actions
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (!isLive) TopBarIcon("▶ Live", onClick = onResume, isText = true)
             TopBarIcon(if (flashEnabled) "⚡" else "🔦", onClick = onFlash)
@@ -687,170 +755,383 @@ private fun TopBarIcon(icon: String, onClick: () -> Unit, isText: Boolean = fals
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(10.dp))
-            .background(Color.Black.copy(alpha = 0.50f))
-            .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
+            .background(Color.Black.copy(0.55f))
+            .border(1.dp, Color.White.copy(0.15f), RoundedCornerShape(10.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = if (isText) 12.dp else 10.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            icon,
-            fontSize   = if (isText) 11.sp else 16.sp,
-            color      = Color.White,
-            fontWeight = FontWeight.Bold
-        )
+        Text(icon, fontSize = if (isText) 11.sp else 16.sp, color = Color.White, fontWeight = FontWeight.Bold)
     }
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// SCANNING HINT LABEL
-// ──────────────────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// LIVE LANGUAGE / SCRIPT PILL
+// ══════════════════════════════════════════════════════════════════════════════
 
 @Composable
-private fun ScanHintLabel(modifier: Modifier) {
-    val infiniteTransition = rememberInfiniteTransition(label = "hint")
-    val alpha by infiniteTransition.animateFloat(
-        initialValue  = 0.4f, targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(1400), RepeatMode.Reverse),
-        label         = "hintAlpha"
-    )
+private fun LiveLanguagePill(langName: String, script: String, modifier: Modifier) {
+    val inf   = rememberInfiniteTransition(label = "lang")
+    val pulse by inf.animateFloat(0.6f, 1f, infiniteRepeatable(tween(1200), RepeatMode.Reverse), "lp")
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(24.dp))
+            .background(Color.Black.copy(0.62f))
+            .border(1.dp, NeonGreen.copy(0.4f), RoundedCornerShape(24.dp))
+            .padding(horizontal = 14.dp, vertical = 6.dp)
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(NeonGreen.copy(pulse)))
+            Text("$langName • $script", style = MaterialTheme.typography.labelSmall, color = NeonGreen, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// QUALITY RING + CAPTURE BUTTON
+// ══════════════════════════════════════════════════════════════════════════════
+
+@Composable
+private fun QualityCapture(
+    quality: Float,
+    hasText: Boolean,
+    modifier: Modifier,
+    onCapture: () -> Unit
+) {
+    val qualityColor = when {
+        quality > 0.75f -> NeonGreen
+        quality > 0.45f -> NeonOrange
+        else            -> NeonPink
+    }
+    val inf    = rememberInfiniteTransition(label = "ring")
+    val rScale by inf.animateFloat(1f, 1.22f, infiniteRepeatable(tween(1100), RepeatMode.Reverse), "rs")
+    val rAlpha by inf.animateFloat(0.5f, 0f,   infiniteRepeatable(tween(1100), RepeatMode.Reverse), "ra")
+
+    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        // Quality label
+        if (hasText) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color.Black.copy(0.6f))
+                    .border(1.dp, qualityColor.copy(0.4f), RoundedCornerShape(16.dp))
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    when {
+                        quality > 0.75f -> "✓ Excellent quality"
+                        quality > 0.45f -> "~ Good quality"
+                        else            -> "! Poor quality"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = qualityColor,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+
+        // Capture button with pulsing ring
+        Box(contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier
+                .size(80.dp)
+                .graphicsLayer(scaleX = rScale, scaleY = rScale)
+                .border(2.dp, (if (hasText) qualityColor else NeonBlueExact).copy(rAlpha), CircleShape)
+            )
+            Box(
+                modifier = Modifier
+                    .size(72.dp)
+                    .clip(CircleShape)
+                    .background(
+                        Brush.radialGradient(
+                            if (hasText) listOf(Color.White, Color(0xFFE0F8FF))
+                            else listOf(Color(0xFF1A2A4A), Color(0xFF0A1428))
+                        )
+                    )
+                    .border(3.5.dp, if (hasText) NeonCyan else NeonBlueExact.copy(0.5f), CircleShape)
+                    .clickable(onClick = onCapture),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("🔍", fontSize = 26.sp)
+            }
+        }
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SCAN HINT LABEL
+// ══════════════════════════════════════════════════════════════════════════════
+
+@Composable
+private fun ScanHintLabel(message: String, isWarning: Boolean, modifier: Modifier) {
+    val inf   = rememberInfiniteTransition(label = "hint")
+    val alpha by inf.animateFloat(0.4f, 1f, infiniteRepeatable(tween(1400), RepeatMode.Reverse), "ha")
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(20.dp))
-            .background(Color.Black.copy(alpha = 0.60f))
-            .border(0.5.dp, NeonBlueExact.copy(0.3f), RoundedCornerShape(20.dp))
-            .padding(horizontal = 22.dp, vertical = 10.dp),
+            .background(Color.Black.copy(0.65f))
+            .border(1.dp, if (isWarning) NeonPink.copy(0.5f) else NeonCyan.copy(0.3f), RoundedCornerShape(20.dp))
+            .padding(horizontal = 20.dp, vertical = 10.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
-            "🔎 Target text in viewfinder",
-            color = Color.White.copy(alpha = alpha),
-            style = MaterialTheme.typography.bodyMedium,
+            message,
+            color      = (if (isWarning) NeonPink else Color.White).copy(alpha),
+            style      = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Medium
         )
     }
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// FROZEN dimming FRAME OVERLAY
-// ──────────────────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// BOTTOM PANEL — 3-TAB (Text / Translate / History)
+// ══════════════════════════════════════════════════════════════════════════════
 
-@Composable
-private fun FrozenOverlay(modifier: Modifier) {
-    Box(
-        modifier = modifier.background(Color.Black.copy(alpha = 0.35f))
-    )
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// BOTTOM SLIDING CONTROL PANEL
-// ──────────────────────────────────────────────────────────────────────────────
-
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun OcrBottomPanel(
-    resultText:       String,
-    detectedLangName: String,
-    detectedLangCode: String,
-    blockCount:       Int,
+    result:           OcrResult,
+    displayText:      String,
     selectedBlock:    RecognizedBlock?,
-    onClearSelection: () -> Unit,
+    selectedParagraph: RecognizedParagraph?,
     translationState: TranslationState,
     targetLanguage:   String,
     languages:        List<String>,
-    isLiveScan:       Boolean,
-    onFreeze:         () -> Unit,
+    activeTab:        Int,
+    scanHistory:      List<OcrScanEntity>,
+    onTabChange:      (Int) -> Unit,
+    onClearSelection: () -> Unit,
     onTranslate:      () -> Unit,
     onSpeak:          (String, String) -> Unit,
-    onLangChange:     (String) -> Unit
+    onLangChange:     (String) -> Unit,
+    onDeleteHistory:  (String) -> Unit
 ) {
     val ctx = LocalContext.current
+    val pagerState = rememberPagerState(initialPage = activeTab) { 3 }
+    val scope      = rememberCoroutineScope()
+
+    LaunchedEffect(activeTab) {
+        if (pagerState.currentPage != activeTab) pagerState.animateScrollToPage(activeTab)
+    }
+    LaunchedEffect(pagerState.currentPage) { onTabChange(pagerState.currentPage) }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
-            .background(
-                Brush.verticalGradient(
-                    listOf(Color(0xDC060D1F), Color(0xF502040A))
-                )
-            )
+            .background(Brush.verticalGradient(listOf(Color(0xDC060D1F), Color(0xF502040A))))
             .border(
-                width = 1.dp,
-                brush = Brush.horizontalGradient(listOf(NeonBlueExact.copy(0.4f), NeonPurple.copy(0.3f))),
-                shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+                1.dp,
+                Brush.horizontalGradient(listOf(NeonBlueExact.copy(0.4f), NeonPurple.copy(0.3f))),
+                RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
             )
             .navigationBarsPadding()
-            .padding(horizontal = 20.dp, vertical = 18.dp)
     ) {
         // Drag handle
         Box(
             modifier = Modifier
-                .width(44.dp).height(4.dp)
+                .padding(top = 12.dp)
+                .width(44.dp)
+                .height(4.dp)
                 .clip(CircleShape)
                 .background(NeonBlueExact.copy(0.4f))
                 .align(Alignment.CenterHorizontally)
         )
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(10.dp))
 
-        // Info Badges Row
+        // Language badge + stats row
         Row(
-            modifier              = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment     = Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment     = Alignment.CenterVertically
-            ) {
-                DetectedLangBadge(detectedLangName)
-                if (selectedBlock != null) {
-                    NeonBadge("Selection Focus", NeonPink)
-                } else {
-                    NeonBadge("Viewfinder Targeted", NeonCyan)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                DetectedLangBadge(result.detectedLanguageName)
+                if (result.detectedScript.isNotBlank()) {
+                    NeonBadge(result.detectedScript, NeonCyan)
                 }
+                if (result.hasRotatedText) NeonBadge("Rotated", NeonOrange)
             }
+            Text(
+                "${result.paragraphs.size} para · ${result.blocks.size} lines",
+                style = MaterialTheme.typography.labelSmall,
+                color = TextSecondary
+            )
+        }
+        Spacer(Modifier.height(10.dp))
 
-            if (isLiveScan) {
+        // Tab bar
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color.White.copy(0.05f))
+                .border(1.dp, Color.White.copy(0.08f), RoundedCornerShape(14.dp))
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            listOf("📄 Text", "🌐 Translate", "🕐 History").forEachIndexed { i, label ->
+                val sel = pagerState.currentPage == i
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Brush.horizontalGradient(listOf(NeonBlueExact, NeonPurple)))
-                        .clickable(onClick = onFreeze)
-                        .padding(horizontal = 16.dp, vertical = 7.dp)
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(if (sel) Brush.horizontalGradient(listOf(NeonBlueExact.copy(0.25f), NeonPurple.copy(0.2f))) else Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent)))
+                        .border(if (sel) 1.dp else 0.dp, if (sel) NeonBlueExact.copy(0.4f) else Color.Transparent, RoundedCornerShape(10.dp))
+                        .clickable { scope.launch { pagerState.animateScrollToPage(i) } }
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        "📸 Capture Frame",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold
+                        label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (sel) Color.White else TextSecondary,
+                        fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal,
+                        fontSize = 10.5.sp
                     )
                 }
             }
         }
+        Spacer(Modifier.height(10.dp))
 
-        Spacer(Modifier.height(12.dp))
+        // Pager content
+        HorizontalPager(
+            state    = pagerState,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 180.dp, max = 360.dp)
+        ) { page ->
+            when (page) {
+                0 -> TextTab(
+                    result        = result,
+                    displayText   = displayText,
+                    selectedBlock = selectedBlock,
+                    selectedParagraph = selectedParagraph,
+                    onClearSelection = onClearSelection,
+                    onSpeak       = { onSpeak(displayText, result.detectedLanguage) },
+                    onCopy        = { copyToClipboard(ctx, displayText) },
+                    modifier      = Modifier.padding(horizontal = 18.dp)
+                )
+                1 -> TranslateTab(
+                    translationState = translationState,
+                    targetLanguage   = targetLanguage,
+                    languages        = languages,
+                    detectedLangCode = result.detectedLanguage,
+                    onTranslate      = onTranslate,
+                    onLangChange     = onLangChange,
+                    onSpeak          = onSpeak,
+                    modifier         = Modifier.padding(horizontal = 18.dp)
+                )
+                2 -> HistoryTab(
+                    history   = scanHistory,
+                    onDelete  = onDeleteHistory,
+                    modifier  = Modifier.padding(horizontal = 18.dp)
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+    }
+}
 
-        // Detected Input Content Card
-        val displayTitle = if (selectedBlock != null) "Selected Text Block" else "Targeted Text"
-        val accentColor = if (selectedBlock != null) NeonPink else NeonBlueExact
+// ══════════════════════════════════════════════════════════════════════════════
+// TAB 0 — TEXT TAB
+// ══════════════════════════════════════════════════════════════════════════════
 
-        DetectedTextCard(
-            text        = resultText,
-            title       = displayTitle,
-            accentColor = accentColor,
-            onSpeak     = { onSpeak(resultText, detectedLangCode) },
-            onCopy      = { copyToClipboard(ctx, resultText) },
-            showClear   = selectedBlock != null,
-            onClear     = onClearSelection
+@Composable
+private fun TextTab(
+    result:           OcrResult,
+    displayText:      String,
+    selectedBlock:    RecognizedBlock?,
+    selectedParagraph: RecognizedParagraph?,
+    onClearSelection: () -> Unit,
+    onSpeak:          () -> Unit,
+    onCopy:           () -> Unit,
+    modifier:         Modifier
+) {
+    Column(modifier = modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+        // Selection badge
+        val selLabel = when {
+            selectedParagraph != null -> "Paragraph Selected"
+            selectedBlock     != null -> "Line Selected"
+            else                      -> "Full Viewfinder Text"
+        }
+        val selColor = when {
+            selectedParagraph != null -> NeonOrange
+            selectedBlock     != null -> NeonPink
+            else                      -> NeonBlueExact
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            NeonBadge(selLabel, selColor)
+            if (selectedBlock != null || selectedParagraph != null) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(NeonPink.copy(0.10f))
+                        .border(0.5.dp, NeonPink.copy(0.35f), RoundedCornerShape(8.dp))
+                        .clickable(onClick = onClearSelection)
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text("Clear ✕", style = MaterialTheme.typography.labelSmall, color = NeonPink, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                SmallIconBtn("🔊", onClick = onSpeak)
+                SmallIconBtn("📋", onClick = onCopy)
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+
+        // Text body
+        Text(
+            text       = displayText,
+            style      = MaterialTheme.typography.bodyMedium,
+            color      = Color.White.copy(0.93f),
+            lineHeight = 22.sp,
+            modifier   = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color.White.copy(0.04f))
+                .border(1.dp, selColor.copy(0.18f), RoundedCornerShape(12.dp))
+                .padding(12.dp)
         )
 
-        Spacer(Modifier.height(12.dp))
+        // Paragraph count info
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            InfoChip("${result.paragraphs.size} paragraphs")
+            InfoChip("${result.blocks.size} lines")
+            InfoChip("${displayText.length} chars")
+            if (result.hasRotatedText) InfoChip("↻ Rotated")
+        }
+        Spacer(Modifier.height(4.dp))
+    }
+}
 
-        // Language Select + Action Button
+// ══════════════════════════════════════════════════════════════════════════════
+// TAB 1 — TRANSLATE TAB
+// ══════════════════════════════════════════════════════════════════════════════
+
+@Composable
+private fun TranslateTab(
+    translationState: TranslationState,
+    targetLanguage:   String,
+    languages:        List<String>,
+    detectedLangCode: String,
+    onTranslate:      () -> Unit,
+    onLangChange:     (String) -> Unit,
+    onSpeak:          (String, String) -> Unit,
+    modifier:         Modifier
+) {
+    val ctx = LocalContext.current
+    Column(modifier = modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+        // Language row
         Row(
-            modifier              = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment     = Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically
         ) {
             LanguageDropdown(
                 selected  = targetLanguage,
@@ -864,123 +1145,139 @@ private fun OcrBottomPanel(
                     .clip(RoundedCornerShape(24.dp))
                     .background(Brush.horizontalGradient(listOf(NeonBlueExact, NeonPurple)))
                     .clickable(onClick = onTranslate)
-                    .padding(horizontal = 22.dp),
+                    .padding(horizontal = 20.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    "Translate",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold
-                )
+                Text("Translate", style = MaterialTheme.typography.titleSmall, color = Color.White, fontWeight = FontWeight.Bold)
             }
         }
+        Spacer(Modifier.height(12.dp))
 
-        // Translation detail results with custom Meaning Cards
+        // Translation result
         AnimatedVisibility(
             visible = translationState !is TranslationState.Idle,
             enter   = expandVertically() + fadeIn(),
             exit    = shrinkVertically() + fadeOut()
         ) {
-            Column {
-                Spacer(Modifier.height(12.dp))
-                TranslationResultCard(
-                    state    = translationState,
-                    onSpeak  = { text, lang -> onSpeak(text, lang) },
-                    onCopy   = { text -> copyToClipboard(ctx, text) },
-                    onShare  = { text -> shareText(ctx, text) }
-                )
+            TranslationResultCard(
+                state   = translationState,
+                onSpeak = onSpeak,
+                onCopy  = { copyToClipboard(ctx, it) },
+                onShare = { shareText(ctx, it) },
+                onSave  = { text ->
+                    val filename = "SmartVisionAI_Translation_${System.currentTimeMillis() / 1000}.txt"
+                    com.smartvision.ai.utils.FileExportHelper.saveTextFile(ctx, filename, text)
+                        .onSuccess {
+                            android.widget.Toast.makeText(ctx, "Exported: $filename to Documents", android.widget.Toast.LENGTH_LONG).show()
+                        }
+                        .onFailure {
+                            android.widget.Toast.makeText(ctx, "Export failed: ${it.message}", android.widget.Toast.LENGTH_LONG).show()
+                        }
+                }
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TAB 2 — HISTORY TAB
+// ══════════════════════════════════════════════════════════════════════════════
+
+@Composable
+private fun HistoryTab(
+    history:  List<OcrScanEntity>,
+    onDelete: (String) -> Unit,
+    modifier: Modifier
+) {
+    if (history.isEmpty()) {
+        Box(modifier = modifier.fillMaxWidth().height(140.dp), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("📂", fontSize = 36.sp)
+                Text("No scans yet", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
+                Text("Capture & translate text to see history", style = MaterialTheme.typography.labelSmall, color = TextHint)
             }
+        }
+        return
+    }
+
+    LazyColumn(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(history, key = { it.id }) { record ->
+            OcrHistoryCard(record = record, onDelete = { onDelete(record.id) })
         }
     }
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// INPUT TEXT PREVIEW CARD
-// ──────────────────────────────────────────────────────────────────────────────
-
 @Composable
-private fun DetectedTextCard(
-    text: String,
-    title: String,
-    accentColor: Color,
-    onSpeak: () -> Unit,
-    onCopy: () -> Unit,
-    showClear: Boolean = false,
-    onClear: () -> Unit = {}
-) {
+private fun OcrHistoryCard(record: OcrScanEntity, onDelete: () -> Unit) {
+    val fmt = remember { SimpleDateFormat("MMM d, HH:mm", Locale.getDefault()) }
+    val timeStr = fmt.format(Date(record.timestamp))
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color.White.copy(alpha = 0.05f))
-            .border(1.dp, accentColor.copy(0.20f), RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color.White.copy(0.04f))
+            .border(1.dp, NeonBlueExact.copy(0.15f), RoundedCornerShape(12.dp))
             .padding(12.dp)
     ) {
         Column {
             Row(
-                modifier              = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment     = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        title,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = accentColor,
-                        fontWeight = FontWeight.Bold
-                    )
-                    if (showClear) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(NeonPink.copy(0.12f))
-                                .border(0.5.dp, NeonPink.copy(0.35f), RoundedCornerShape(8.dp))
-                                .clickable(onClick = onClear)
-                                .padding(horizontal = 8.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                "Clear Select ✕",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = NeonPink,
-                                fontSize = 8.5.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    NeonBadge(record.sourceLang, NeonBlueExact)
+                    if (!record.targetLang.isNullOrBlank()) {
+                        Text("→", color = TextSecondary, fontSize = 11.sp)
+                        NeonBadge(record.targetLang, NeonPurple)
                     }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    SmallIconBtn("🔊", onClick = onSpeak)
-                    SmallIconBtn("📋", onClick = onCopy)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(timeStr, style = MaterialTheme.typography.labelSmall, color = TextHint)
+                    SmallIconBtn("✕", onClick = onDelete)
                 }
             }
             Spacer(Modifier.height(6.dp))
             Text(
-                text       = text,
-                style      = MaterialTheme.typography.bodyMedium,
-                color      = Color.White.copy(0.95f),
-                maxLines   = 4,
-                overflow   = TextOverflow.Ellipsis,
-                lineHeight = 20.sp
+                record.extractedText.take(90) + if (record.extractedText.length > 90) "…" else "",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.White.copy(0.75f),
+                lineHeight = 18.sp
             )
+            if (!record.translatedText.isNullOrBlank()) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    record.translatedText.take(70) + if (record.translatedText.length > 70) "…" else "",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = NeonPurple.copy(0.85f),
+                    lineHeight = 16.sp
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                InfoChip("${record.wordCount}w")
+                InfoChip("${record.paragraphCount} para")
+                InfoChip(record.script)
+            }
         }
     }
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// TRANSLATION SUCCESS DETAILS CARD WITH NATIVE ORIGINAL LANGUAGE MEANING (CRITICAL)
-// ──────────────────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// TRANSLATION RESULT CARD
+// ══════════════════════════════════════════════════════════════════════════════
 
 @Composable
 private fun TranslationResultCard(
     state:   TranslationState,
     onSpeak: (String, String) -> Unit,
     onCopy:  (String) -> Unit,
-    onShare: (String) -> Unit
+    onShare: (String) -> Unit,
+    onSave:  (String) -> Unit
 ) {
+    // ...
     when (state) {
         is TranslationState.Downloading, is TranslationState.Translating -> {
             Box(
@@ -992,19 +1289,10 @@ private fun TranslationResultCard(
                     .padding(16.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment     = Alignment.CenterVertically
-                ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        color    = NeonPurple,
-                        strokeWidth = 2.dp
-                    )
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), color = NeonPurple, strokeWidth = 2.dp)
                     Text(
-                        if (state is TranslationState.Downloading)
-                            "⬇ Downloading language modules..."
-                        else "Translating focused text...",
+                        if (state is TranslationState.Downloading) "⬇ Downloading language model..." else "Translating...",
                         style = MaterialTheme.typography.bodyMedium,
                         color = NeonPurple
                     )
@@ -1017,21 +1305,13 @@ private fun TranslationResultCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp))
-                    .background(Color.White.copy(0.06f))
+                    .background(Color.White.copy(0.05f))
                     .border(1.dp, NeonPurple.copy(0.35f), RoundedCornerShape(14.dp))
                     .padding(14.dp)
             ) {
                 Column {
-                    // Header badges
-                    Row(
-                        modifier              = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment     = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment     = Alignment.CenterVertically
-                        ) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                             NeonBadge(state.sourceLang, NeonBlueExact)
                             Text("→", color = Color.White.copy(0.4f), fontSize = 12.sp)
                             NeonBadge(state.targetLang, NeonPurple)
@@ -1040,53 +1320,34 @@ private fun TranslationResultCard(
                             SmallIconBtn("🔊") { onSpeak(state.translatedText, "en") }
                             SmallIconBtn("📋") { onCopy(state.translatedText) }
                             SmallIconBtn("↑")  { onShare(state.translatedText) }
+                            SmallIconBtn("💾") { onSave(state.translatedText) }
                         }
                     }
                     Spacer(Modifier.height(8.dp))
-
-                    // Translated Main Text Card
                     Text(
-                        text      = state.translatedText,
-                        style     = MaterialTheme.typography.bodyLarge,
-                        color     = Color.White,
+                        text       = state.translatedText,
+                        style      = MaterialTheme.typography.bodyLarge,
+                        color      = Color.White,
                         fontWeight = FontWeight.SemiBold,
                         lineHeight = 24.sp
                     )
 
-                    // ── Premium AI Semantic Breakdown ──────────────────────────────────
+                    // AI Semantic / native meaning
                     state.semanticMeaning?.let { meaning ->
-                        Spacer(Modifier.height(12.dp))
-                        HorizontalDivider(color = Color.White.copy(alpha = 0.12f))
                         Spacer(Modifier.height(10.dp))
-                        SemanticMeaningCard(
-                            meaning        = meaning,
-                            sourceLangName = state.sourceLang,
-                            targetLangName = state.targetLang
-                        )
-                    } ?: state.nativeMeaning?.let { meaning ->
-                        Spacer(Modifier.height(12.dp))
-                        HorizontalDivider(color = Color.White.copy(alpha = 0.12f))
+                        HorizontalDivider(color = Color.White.copy(0.10f))
+                        Spacer(Modifier.height(8.dp))
+                        SemanticMeaningCard(meaning = meaning, sourceLangName = state.sourceLang, targetLangName = state.targetLang)
+                    } ?: state.nativeMeaning?.let { m ->
                         Spacer(Modifier.height(10.dp))
-                        
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment     = Alignment.CenterVertically
-                        ) {
+                        HorizontalDivider(color = Color.White.copy(0.10f))
+                        Spacer(Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text("💡", fontSize = 12.sp)
-                            Text(
-                                "Meaning in ${state.sourceLang}:",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = NeonBlueExact,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Text("Meaning in ${state.sourceLang}:", style = MaterialTheme.typography.labelSmall, color = NeonBlueExact, fontWeight = FontWeight.Bold)
                         }
                         Spacer(Modifier.height(4.dp))
-                        Text(
-                            text = meaning,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color.White.copy(alpha = 0.85f),
-                            lineHeight = 20.sp
-                        )
+                        Text(m, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.8f), lineHeight = 18.sp)
                     }
                 }
             }
@@ -1101,35 +1362,22 @@ private fun TranslationResultCard(
                     .border(1.dp, NeonPink.copy(0.3f), RoundedCornerShape(14.dp))
                     .padding(14.dp)
             ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment     = Alignment.Top
-                ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
                     Text("⚠️", fontSize = 18.sp)
-                    Text(
-                        state.message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = NeonPink
-                    )
+                    Text(state.message, style = MaterialTheme.typography.bodySmall, color = NeonPink)
                 }
             }
         }
-
         else -> {}
     }
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// LANGUAGE DROPDOWN SELECTOR
-// ──────────────────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// LANGUAGE DROPDOWN
+// ══════════════════════════════════════════════════════════════════════════════
 
 @Composable
-private fun LanguageDropdown(
-    selected:  String,
-    languages: List<String>,
-    onChange:  (String) -> Unit,
-    modifier:  Modifier = Modifier
-) {
+private fun LanguageDropdown(selected: String, languages: List<String>, onChange: (String) -> Unit, modifier: Modifier = Modifier) {
     var expanded by remember { mutableStateOf(false) }
     Box(modifier = modifier) {
         Box(
@@ -1138,33 +1386,21 @@ private fun LanguageDropdown(
                 .height(48.dp)
                 .clip(RoundedCornerShape(24.dp))
                 .background(Color.White.copy(0.06f))
-                .border(1.dp, NeonBlueExact.copy(0.3f), RoundedCornerShape(24.dp))
+                .border(1.dp, NeonBlueExact.copy(0.35f), RoundedCornerShape(24.dp))
                 .clickable { expanded = true }
                 .padding(horizontal = 16.dp),
             contentAlignment = Alignment.CenterStart
         ) {
-            Row(
-                modifier              = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment     = Alignment.CenterVertically
-            ) {
-                Text(
-                    "→ $selected",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.White,
-                    fontWeight = FontWeight.Medium
-                )
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("→ $selected", style = MaterialTheme.typography.bodyMedium, color = Color.White, fontWeight = FontWeight.Medium)
                 Text("▼", color = NeonBlueExact, fontSize = 10.sp)
             }
         }
-        DropdownMenu(
-            expanded         = expanded,
-            onDismissRequest = { expanded = false },
-            modifier = Modifier.background(Color(0xFF0F172A)).border(0.5.dp, NeonBlueExact.copy(0.3f), RoundedCornerShape(8.dp))
-        ) {
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false },
+            modifier = Modifier.background(Color(0xFF0F172A)).border(0.5.dp, NeonBlueExact.copy(0.3f), RoundedCornerShape(8.dp))) {
             languages.forEach { lang ->
                 DropdownMenuItem(
-                    text    = { Text(lang, color = Color.White) },
+                    text = { Text(lang, color = Color.White) },
                     onClick = { onChange(lang); expanded = false },
                     trailingIcon = if (lang == selected) ({ Text("✓", color = NeonBlueExact) }) else null
                 )
@@ -1173,9 +1409,9 @@ private fun LanguageDropdown(
     }
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// WIDGET HELPERS
-// ──────────────────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// SMALL HELPERS & WIDGETS
+// ══════════════════════════════════════════════════════════════════════════════
 
 @Composable
 private fun DetectedLangBadge(name: String) {
@@ -1186,65 +1422,47 @@ private fun DetectedLangBadge(name: String) {
             .border(1.dp, NeonBlueExact.copy(0.35f), RoundedCornerShape(20.dp))
             .padding(horizontal = 12.dp, vertical = 5.dp)
     ) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment     = Alignment.CenterVertically
-        ) {
-            PulsingIndicatorDot(NeonBlueExact)
-            Text(
-                name,
-                style = MaterialTheme.typography.labelSmall,
-                color = NeonBlueExact,
-                fontWeight = FontWeight.Bold
-            )
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            PulsingDot(NeonBlueExact)
+            Text(name, style = MaterialTheme.typography.labelSmall, color = NeonBlueExact, fontWeight = FontWeight.Bold)
         }
     }
 }
 
 @Composable
-private fun PulsingIndicatorDot(color: Color) {
-    val scale by rememberInfiniteTransition(label = "indicator").animateFloat(
-        initialValue  = 0.6f, targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(800), RepeatMode.Reverse),
-        label         = "dotScale"
+private fun PulsingDot(color: Color) {
+    val s by rememberInfiniteTransition(label = "dot").animateFloat(
+        0.5f, 1f, infiniteRepeatable(tween(800), RepeatMode.Reverse), "ds"
     )
-    Box(
-        modifier = Modifier
-            .size(6.dp)
-            .graphicsLayer(scaleX = scale, scaleY = scale)
-            .clip(CircleShape)
-            .background(color)
-    )
+    Box(modifier = Modifier.size(6.dp).graphicsLayer(scaleX = s, scaleY = s).clip(CircleShape).background(color))
 }
 
 @Composable
 private fun SmallIconBtn(icon: String, onClick: () -> Unit) {
     Box(
-        modifier = Modifier
-            .size(30.dp)
-            .clip(CircleShape)
-            .background(Color.White.copy(0.08f))
-            .clickable(onClick = onClick),
+        modifier = Modifier.size(30.dp).clip(CircleShape).background(Color.White.copy(0.08f)).clickable(onClick = onClick),
         contentAlignment = Alignment.Center
-    ) {
-        Text(icon, fontSize = 12.sp)
-    }
+    ) { Text(icon, fontSize = 12.sp) }
+}
+
+@Composable
+private fun InfoChip(text: String) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color.White.copy(0.05f))
+            .border(1.dp, Color.White.copy(0.10f), RoundedCornerShape(8.dp))
+            .padding(horizontal = 8.dp, vertical = 3.dp)
+    ) { Text(text, style = MaterialTheme.typography.labelSmall, color = TextSecondary, fontSize = 9.5.sp) }
 }
 
 @Composable
 private fun NoCameraPermissionView(onRequest: () -> Unit, modifier: Modifier) {
     Box(modifier = modifier.background(DeepNavy), contentAlignment = Alignment.Center) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Text("📷", fontSize = 56.sp)
-            Text("Camera permission required", color = Color.White, style = MaterialTheme.typography.titleMedium)
-            Text(
-                "Grant permission to translate text from real world images",
-                color = TextSecondary,
-                style = MaterialTheme.typography.bodyMedium
-            )
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text("📷", fontSize = 60.sp)
+            Text("Camera permission required", color = Color.White, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text("Grant permission to scan and translate text from the real world", color = TextSecondary, style = MaterialTheme.typography.bodyMedium)
             NeonButton("Grant Permission", onClick = onRequest, modifier = Modifier.padding(horizontal = 32.dp))
         }
     }
@@ -1261,10 +1479,7 @@ private fun OcrErrorBanner(message: String, onDismiss: () -> Unit, modifier: Mod
             .clickable(onClick = onDismiss)
             .padding(12.dp)
     ) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment     = Alignment.CenterVertically
-        ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("⚠️")
             Text(message, style = MaterialTheme.typography.bodySmall, color = NeonPink, modifier = Modifier.weight(1f))
             Text("✕", color = NeonPink, fontSize = 12.sp)
@@ -1272,19 +1487,205 @@ private fun OcrErrorBanner(message: String, onDismiss: () -> Unit, modifier: Mod
     }
 }
 
+// ── Utility functions ─────────────────────────────────────────────────────────
+
 private fun copyToClipboard(ctx: Context, text: String) {
     val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     cm.setPrimaryClip(ClipData.newPlainText("OCR Text", text))
 }
 
 private fun shareText(ctx: Context, text: String) {
-    ctx.startActivity(
-        Intent.createChooser(
-            Intent(Intent.ACTION_SEND).apply {
-                type = "text/plain"
-                putExtra(Intent.EXTRA_TEXT, text)
-            },
-            "Share via"
+    ctx.startActivity(Intent.createChooser(
+        Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, text) },
+        "Share via"
+    ))
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// GOOGLE LENS TRANSLATE OVERLAY & MODE SELECTOR
+// ══════════════════════════════════════════════════════════════════════════════
+
+@Composable
+private fun GoogleLensTranslateOverlay(
+    blocks: List<RecognizedBlock>,
+    blockTranslations: Map<String, String>,
+    frameWidth: Int,
+    frameHeight: Int,
+    modifier: Modifier
+) {
+    var cW by remember { mutableStateOf(1) }
+    var cH by remember { mutableStateOf(1) }
+
+    Box(modifier = modifier.onGloballyPositioned { cW = it.size.width; cH = it.size.height }) {
+        if (blocks.isEmpty() || cW <= 1) return@Box
+
+        val fW = frameWidth.toFloat().coerceAtLeast(1f)
+        val fH = frameHeight.toFloat().coerceAtLeast(1f)
+        val sW = cW.toFloat()
+        val sH = cH.toFloat()
+        val sc = maxOf(sW / fW, sH / fH)
+        val ox = (sW - fW * sc) / 2f
+        val oy = (sH - fH * sc) / 2f
+
+        blocks.forEach { b ->
+            val translatedText = blockTranslations[b.text]
+            if (!translatedText.isNullOrBlank() && translatedText != b.text) {
+                val l = b.left * fW * sc + ox
+                val t = b.top * fH * sc + oy
+                val r = b.right * fW * sc + ox
+                val bo = b.bottom * fH * sc + oy
+                val w = r - l
+                val h = bo - t
+
+                Box(
+                    modifier = Modifier
+                        .offset { IntOffset(l.toInt(), t.toInt()) }
+                        .size(width = w.dp / LocalDensity.current.density, height = h.dp / LocalDensity.current.density)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(DeepNavy.copy(0.92f))
+                        .border(0.5.dp, NeonPurple.copy(0.5f), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = translatedText,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontSize = (h * 0.45f).coerceIn(8f, 16f).sp,
+                            fontWeight = FontWeight.Bold,
+                            color = NeonCyan
+                        ),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OcrModeSelector(
+    activeMode: OcrMode,
+    onModeChange: (OcrMode) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color.Black.copy(0.7f))
+            .border(1.dp, Color.White.copy(0.12f), RoundedCornerShape(20.dp))
+            .padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        listOf(
+            OcrMode.TRANSLATE to "🌐 Translate",
+            OcrMode.TEXT to "📄 Text"
+        ).forEach { (mode, label) ->
+            val isSelected = activeMode == mode
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(
+                        if (isSelected) Brush.horizontalGradient(listOf(NeonBlue, NeonPurple))
+                        else Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent))
+                    )
+                    .clickable { onModeChange(mode) }
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (isSelected) Color.White else TextSecondary,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun OcrSourceLanguagePickerSheet(
+    current: Language,
+    onSelect: (Language) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    val sourceLanguages = remember {
+        listOf(Language("auto", "Auto-detect", "🌐", "Auto")) + ALL_LANGUAGES
+    }
+    val filtered = sourceLanguages.filter {
+        query.isBlank() || it.displayName.contains(query, ignoreCase = true) || it.nativeName.contains(query, ignoreCase = true)
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .fillMaxHeight(0.7f)
+            .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+            .background(Color(0xFF060D1F))
+            .border(1.dp, Color.White.copy(0.15f), RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+            .navigationBarsPadding()
+    ) {
+        Box(Modifier.padding(top = 10.dp).width(40.dp).height(4.dp).clip(CircleShape).background(NeonBlue.copy(0.4f)).align(Alignment.CenterHorizontally))
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "Select Source Language",
+                style = MaterialTheme.typography.titleSmall, color = Color.White, fontWeight = FontWeight.Bold
+            )
+            Box(Modifier.clip(CircleShape).background(Color.White.copy(0.08f)).clickable(onClick = onDismiss).padding(6.dp)) {
+                Text("✕", color = Color.White, fontSize = 14.sp)
+            }
+        }
+
+        OutlinedTextField(
+            value         = query,
+            onValueChange = { query = it },
+            modifier      = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            placeholder   = { Text("Search language...", color = Color.White.copy(0.4f)) },
+            shape         = RoundedCornerShape(12.dp),
+            colors        = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor    = NeonBlue,
+                unfocusedBorderColor  = Color.White.copy(0.15f),
+                focusedContainerColor = Color.White.copy(0.05f),
+                unfocusedContainerColor = Color.White.copy(0.05f),
+                cursorColor           = NeonBlue,
+                focusedTextColor      = Color.White,
+                unfocusedTextColor    = Color.White
+            ),
+            singleLine = true
         )
-    )
+
+        LazyColumn(
+            modifier        = Modifier.fillMaxSize(),
+            contentPadding  = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            items(filtered, key = { it.code }) { lang ->
+                val isSelected = lang.code == current.code
+                Row(
+                    modifier = Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .then(
+                            if (isSelected) Modifier.background(NeonBlue.copy(0.15f)).border(1.dp, NeonBlue.copy(0.4f), RoundedCornerShape(10.dp))
+                            else Modifier.background(Color.White.copy(0.04f))
+                        )
+                        .clickable { onSelect(lang); onDismiss() }
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(lang.flag, fontSize = 20.sp)
+                    Column(Modifier.weight(1f)) {
+                        Text(lang.displayName, style = MaterialTheme.typography.bodyMedium, color = if (isSelected) NeonBlue else Color.White, fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal)
+                        Text(lang.nativeName, style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                    }
+                    if (isSelected) Text("✓", color = NeonBlue, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
 }

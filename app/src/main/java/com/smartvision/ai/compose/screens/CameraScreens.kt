@@ -100,6 +100,20 @@ fun QrScannerScreen(onBack: () -> Unit) {
 private fun QrCameraPreview(modifier: Modifier, onQrDetected: (String) -> Unit) {
     val context       = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+
+    DisposableEffect(lifecycleOwner) {
+        onDispose {
+            val future = ProcessCameraProvider.getInstance(context)
+            future.addListener({
+                try {
+                    future.get().unbindAll()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }, ContextCompat.getMainExecutor(context))
+        }
+    }
+
     AndroidView(
         factory = { ctx ->
             val pv = PreviewView(ctx).apply {

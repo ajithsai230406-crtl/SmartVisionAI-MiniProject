@@ -15,10 +15,13 @@ enum class WasteType(
     PAPER        ("Paper",         "📄", 0xFFFFD700, "Yellow Bin",  "PAP"),
     GLASS        ("Glass",         "🍶", 0xFF00E5FF, "White Bin",   "GL"),
     EWASTE       ("E-Waste",       "💻", 0xFFFF6600, "WEEE Point",  "WEEE"),
+    BATTERY      ("Battery",       "🔋", 0xFFFF9900, "Battery Bin", "BAT"),
     HAZARDOUS    ("Hazardous",     "☢️", 0xFFFF073A, "HHW Facility","HHW"),
+    MEDICAL      ("Medical Waste", "🏥", 0xFFFF1744, "Hazmat Box",  "MED"),
     TEXTILE      ("Textile",       "👕", 0xFFBF5FFF, "Textile Box", "CLO"),
     NON_RECYCLABLE("Non-Recyclable","🗑️",0xFF555555, "Black Bin",  "—"),
-    MIXED        ("Mixed Waste",   "♻️", 0xFF7B7BFF, "Check First", "MIX")
+    MIXED        ("Mixed Waste",   "♻️", 0xFF7B7BFF, "Check First", "MIX"),
+    RECYCLABLE   ("Recyclable",    "♻️", 0xFF00FF88, "Blue Bin",    "REC")
 }
 
 /** Rich per-type knowledge */
@@ -35,18 +38,31 @@ data class WasteKnowledge(
 
 /** A classified waste result */
 data class WasteResult(
-    val primaryType:   WasteType,
-    val confidence:    Float,
-    val allCategories: List<WasteCategoryScore>,
-    val rawLabel:      String
+    val primaryType:        WasteType,
+    val confidence:         Float,
+    val allCategories:      List<WasteCategoryScore>,
+    val rawLabel:           String,
+    val exactItemName:      String = "",
+    val recyclingCategory:  String = "",
+    val disposalMethod:     String = "",   // e.g. "Blue Recycle Bin", "WEEE Point"
+    val disposalSteps:      List<String> = emptyList(),
+    val reuseSuggestions:   String = "",
+    val environmentalImpact:String = "",
+    val ecoScore:           Int = 50,
+    val carbonReduction:    String = "",
+    val carbonImpact:       String = "",   // per-item carbon cost, e.g. "6.2 kg CO₂/kg"
+    val sustainabilityTip:  String = "",
+    val isRecyclable:       Boolean = true,
+    val isReusable:         Boolean = true
 )
 
 data class WasteCategoryScore(val type: WasteType, val score: Float)
 
 /** Scan state machine */
 sealed class WasteScanState {
-    object Idle      : WasteScanState()
-    object Scanning  : WasteScanState()
+    object Idle         : WasteScanState()
+    object Scanning     : WasteScanState()  // one-shot scan in progress
+    object LiveScanning : WasteScanState()  // live scan active, showing camera
     data class Classified(val result: WasteResult) : WasteScanState()
     data class Error(val message: String)          : WasteScanState()
 }
@@ -58,10 +74,13 @@ fun String.toWasteType(): WasteType = when (this.lowercase().trim()) {
     "food_waste", "organic_material", "organic"             -> WasteType.ORGANIC
     "cardboard", "paper", "newspaper"                       -> WasteType.PAPER
     "glass_bottle", "glass"                                 -> WasteType.GLASS
-    "electronic_waste", "e-waste", "battery"                -> WasteType.EWASTE
+    "electronic_waste", "e-waste"                           -> WasteType.EWASTE
+    "battery"                                               -> WasteType.BATTERY
     "hazardous", "chemical", "paint"                        -> WasteType.HAZARDOUS
+    "medical_waste", "medical", "syringe", "vial"           -> WasteType.MEDICAL
     "clothing", "textile", "rubber"                         -> WasteType.TEXTILE
     "mixed_waste"                                           -> WasteType.MIXED
+    "recyclable", "recyclable_waste"                        -> WasteType.RECYCLABLE
     else                                                    -> WasteType.NON_RECYCLABLE
 }
 
@@ -136,6 +155,17 @@ object WasteKnowledgeBase {
             funFact          = "One million recycled mobile phones yield ~15 kg gold, 150 kg silver and 3 kg palladium."
         ),
 
+        WasteType.BATTERY to WasteKnowledge(
+            type             = WasteType.BATTERY,
+            description      = "Batteries contain hazardous metals and corrosive chemicals. They must never be discarded in general waste bins.",
+            disposalSteps    = listOf("Tape the terminals for safety", "Place in dedicated battery collection box", "Take to local hazardous waste facility", "Never incinerate or puncture batteries"),
+            ecoTip           = "Use rechargeable batteries to reduce environmental waste and save money.",
+            reusabilityInfo  = "Single-use batteries cannot be reused. Choose rechargeable batteries.",
+            carbonFootprint  = "Recycling batteries prevents heavy metal pollution and saves up to 50% energy vs new raw materials.",
+            recyclingRate    = 0.45f,
+            funFact          = "A single battery can contaminate up to 600,000 litres of water if thrown in standard landfill."
+        ),
+
         WasteType.HAZARDOUS to WasteKnowledge(
             type             = WasteType.HAZARDOUS,
             description      = "Hazardous household waste (HHW) includes paints, solvents, pesticides, batteries and medicines. These require special disposal.",
@@ -145,6 +175,17 @@ object WasteKnowledgeBase {
             carbonFootprint  = "Improper hazardous waste disposal can contaminate groundwater for decades.",
             recyclingRate    = 0.30f,
             funFact          = "The average household generates 4–9 kg of hazardous waste per year without realising it."
+        ),
+
+        WasteType.MEDICAL to WasteKnowledge(
+            type             = WasteType.MEDICAL,
+            description      = "Medical waste includes syringes, medicine containers, and bandages. These require biohazard disposal to prevent infection and chemical pollution.",
+            disposalSteps    = listOf("Place sharps in a puncture-proof container", "Keep out of reach of children", "Dispose at a healthcare center or HHW facility", "Do not recycle or compost medical waste"),
+            ecoTip           = "Return unused or expired medicines to registered pharmacies for safe disposal.",
+            reusabilityInfo  = "Medical waste is strictly single-use and biohazardous. It must never be reused.",
+            carbonFootprint  = "Incineration of medical waste is energy intensive, but proper disposal protects local water supplies and public health.",
+            recyclingRate    = 0.10f,
+            funFact          = "Over 16 billion injections are administered worldwide every year, making medical sharps disposal a major global priority."
         ),
 
         WasteType.TEXTILE to WasteKnowledge(
@@ -167,6 +208,16 @@ object WasteKnowledgeBase {
             carbonFootprint  = "Non-recyclables typically end up in landfill, releasing CO₂ and methane over decades.",
             recyclingRate    = 0.05f,
             funFact          = "Styrofoam can take up to 500 years to decompose but takes only minutes to manufacture."
+        ),
+        WasteType.RECYCLABLE to WasteKnowledge(
+            type             = WasteType.RECYCLABLE,
+            description      = "Recyclable items can be processed and remanufactured into new products, conserving natural resources and saving energy.",
+            disposalSteps    = listOf("Clean off any food or liquid residue", "Flatten boxes and containers to save space", "Place in the designated recycling bin", "Check local community recycling rules"),
+            ecoTip           = "Buying products with high recycled content completes the recycling loop.",
+            reusabilityInfo  = "Highly recyclable. Check product resin code or material type to confirm.",
+            carbonFootprint  = "Recycling saves substantial carbon compared to virgin manufacturing.",
+            recyclingRate    = 0.75f,
+            funFact          = "Recycling one ton of paper saves 17 trees, 7,000 gallons of water, and 4,000 kilowatts of electricity."
         )
     )
 

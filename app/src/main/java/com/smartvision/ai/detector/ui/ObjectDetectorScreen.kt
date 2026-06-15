@@ -1,6 +1,7 @@
 package com.smartvision.ai.detector.ui
 
 import android.Manifest
+import android.graphics.Bitmap
 import android.view.ViewGroup
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -10,6 +11,8 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
@@ -23,6 +26,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -65,6 +70,11 @@ fun ObjectDetectorScreen(
     LaunchedEffect(Unit) {
         if (!camPerm.status.isGranted) camPerm.launchPermissionRequest()
     }
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel.stopSpeaking()
+        }
+    }
     LaunchedEffect(flashEnabled) {
         cameraRef.value?.cameraControl?.enableTorch(flashEnabled)
     }
@@ -77,7 +87,7 @@ fun ObjectDetectorScreen(
                 modifier             = Modifier.fillMaxSize(),
                 onCameraReady        = { cameraRef.value = it },
                 onPreviewViewCreated = { previewViewRef.value = it },
-                onFrame              = { img, rot, w, h -> viewModel.analyzeFrame(img, rot, w, h) }
+                onFrame              = { bitmap -> viewModel.analyzeFrame(bitmap) }
             )
         } else {
             NoCamPermView(
@@ -106,11 +116,13 @@ fun ObjectDetectorScreen(
         }
 
         // ── Top HUD ────────────────────────────────────────────────────────────
+        val activeItems = (detectionState as? DetectionState.Active)?.items ?: emptyList()
         DetectorTopHud(
             fps          = fps,
             flashEnabled = flashEnabled,
             showOverlay  = showOverlay,
             isLive       = isLive,
+            objectCount  = activeItems.size,
             onBack       = onBack,
             onFlash      = { viewModel.toggleFlash() },
             onOverlay    = { viewModel.toggleOverlay() },
@@ -119,17 +131,29 @@ fun ObjectDetectorScreen(
         )
 
         // ── Bottom detection info strip ───────────────────────────────────────
-        val activeItems = (detectionState as? DetectionState.Active)?.items ?: emptyList()
         AnimatedVisibility(
             visible  = activeItems.isNotEmpty() && selectedItem == null,
             enter    = slideInVertically { it } + fadeIn(),
             exit     = slideOutVertically { it } + fadeOut(),
             modifier = Modifier.align(Alignment.BottomCenter)
         ) {
-            DetectionStrip(
-                items      = activeItems,
-                selected   = selectedItem,
-                onSelect   = { viewModel.selectItem(it, previewViewRef.value?.bitmap) }
+            ObjectsListSheet(
+                items     = activeItems,
+                onSelect  = { viewModel.selectItem(it, previewViewRef.value?.bitmap) },
+                onDismiss = onBack,
+                onSpeak   = {
+                    val names = activeItems.joinToString(". ") { it.label }
+                    viewModel.speakObject(
+                        DetectedItem(
+                            id = -1,
+                            label = "Detected ${activeItems.size} items: $names",
+                            confidence = 1f,
+                            box = DetectionBox(0f, 0f, 0f, 0f),
+                            category = ObjectCategory.OTHER,
+                            accentColor = 0xFFFFFFFF
+                        )
+                    )
+                }
             )
         }
 
@@ -141,6 +165,22 @@ fun ObjectDetectorScreen(
             modifier = Modifier.align(Alignment.Center)
         ) {
             ScanningIndicator()
+        }
+
+        // ── Gallery image loading indicator ──────────────────────────────────
+        AnimatedVisibility(
+            visible  = detectionState is DetectionState.Scanning,
+            enter    = fadeIn(),
+            exit     = fadeOut(),
+            modifier = Modifier.align(Alignment.Center)
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                CircularProgressIndicator(color = NeonBlue)
+                Text("Analyzing image...", style = MaterialTheme.typography.bodySmall, color = Color.White)
+            }
         }
 
         // ── Object detail sheet ───────────────────────────────────────────────
@@ -172,13 +212,27 @@ private fun DetectorCameraPreview(
     modifier:             Modifier,
     onCameraReady:        (Camera) -> Unit,
     onPreviewViewCreated: (PreviewView) -> Unit,
-    onFrame:              suspend (android.media.Image, Int, Int, Int) -> Unit
+    onFrame:              suspend (Bitmap) -> Unit
 ) {
     val ctx            = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope          = rememberCoroutineScope()
-    val executor       = remember { Executors.newSingleThreadExecutor() }
-    val processing     = remember { AtomicBoolean(false) }
+    val executor       = remember { java.util.concurrent.Executors.newSingleThreadExecutor() }
+    val processing     = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
+
+    DisposableEffect(lifecycleOwner) {
+        onDispose {
+            executor.shutdown()
+            val future = ProcessCameraProvider.getInstance(ctx)
+            future.addListener({
+                try {
+                    future.get().unbindAll()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }, ContextCompat.getMainExecutor(ctx))
+        }
+    }
 
     AndroidView(
         modifier = modifier,
@@ -197,15 +251,24 @@ private fun DetectorCameraPreview(
 
                 val analysis = ImageAnalysis.Builder()
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                    .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
+                    .setTargetResolution(android.util.Size(640, 640))
                     .build()
 
                 analysis.setAnalyzer(executor) { proxy ->
-                    val img = proxy.image
-                    if (img != null && processing.compareAndSet(false, true)) {
-                        scope.launch {
+                    if (processing.compareAndSet(false, true)) {
+                        scope.launch(kotlinx.coroutines.Dispatchers.Default) {
                             try {
-                                onFrame(img, proxy.imageInfo.rotationDegrees, img.width, img.height)
+                                val rotation = proxy.imageInfo.rotationDegrees
+                                val bitmap = proxy.toBitmap()
+                                val rotatedBitmap = if (rotation != 0) {
+                                    val matrix = android.graphics.Matrix().apply { postRotate(rotation.toFloat()) }
+                                    Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+                                } else {
+                                    bitmap
+                                }
+                                onFrame(rotatedBitmap)
+                            } catch (e: Exception) {
+                                e.printStackTrace()
                             } finally {
                                 proxy.close()
                                 processing.set(false)
@@ -451,7 +514,7 @@ private fun BoundingBoxOverlay(
                         .padding(horizontal = 8.dp, vertical = 3.dp)
                 ) {
                     Text(
-                        "${item.label}  $pct%",
+                        "#${item.id} ${item.label.replaceFirstChar { it.uppercase() }}  $pct%",
                         style      = MaterialTheme.typography.labelSmall,
                         color      = Color.Black,
                         fontWeight = FontWeight.Bold,
@@ -473,6 +536,7 @@ private fun DetectorTopHud(
     flashEnabled: Boolean,
     showOverlay:  Boolean,
     isLive:       Boolean,
+    objectCount:  Int,
     onBack:       () -> Unit,
     onFlash:      () -> Unit,
     onOverlay:    () -> Unit,
@@ -487,28 +551,49 @@ private fun DetectorTopHud(
         verticalAlignment     = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        // Back + title
+        // Back + title + badges
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             HudButton("←", onClick = onBack)
             Column {
-                Text("Object Detector", style = MaterialTheme.typography.titleMedium, color = Color.White, fontWeight = FontWeight.Bold)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "Object Detector",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
+                    )
+                    if (objectCount > 0) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(NeonCyan.copy(0.15f))
+                                .border(1.5.dp, NeonCyan, RoundedCornerShape(8.dp))
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text("$objectCount", style = MaterialTheme.typography.labelSmall, color = NeonCyan, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    if (fps > 0) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color.Black.copy(0.6f))
+                                .border(1.dp, NeonGreen.copy(0.3f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text("$fps FPS", style = MaterialTheme.typography.labelSmall, color = NeonGreen, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
                 Text("Visual AI Scanner", style = MaterialTheme.typography.labelSmall, color = NeonBlue)
             }
         }
 
         // Right controls
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            // FPS badge
-            if (fps > 0) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(Color.Black.copy(0.6f))
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Text("$fps FPS", style = MaterialTheme.typography.labelSmall, color = NeonGreen, fontWeight = FontWeight.Bold)
-                }
-            }
             if (!isLive) HudButton("▶", onClick = onResume)
             HudButton(if (showOverlay) "◈" else "◉", onClick = onOverlay)
             HudButton(if (flashEnabled) "⚡" else "🔦", onClick = onFlash)
@@ -531,73 +616,189 @@ private fun HudButton(icon: String, onClick: () -> Unit) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// DETECTION STRIP (horizontal scrolling detected objects)
+// ══════════════════════════════════════════════════════════════════════════════
+// TARGET ICON
 // ══════════════════════════════════════════════════════════════════════════════
 
 @Composable
-private fun DetectionStrip(
-    items:    List<DetectedItem>,
-    selected: DetectedItem?,
-    onSelect: (DetectedItem) -> Unit
+fun TargetIcon(modifier: Modifier = Modifier, color: Color = NeonCyan) {
+    Canvas(modifier = modifier) {
+        val r = size.minDimension / 2
+        // Outer circle
+        drawCircle(color, r * 0.9f, style = Stroke(3f))
+        // Inner circle
+        drawCircle(color, r * 0.5f, style = Stroke(2f))
+        // Center dot
+        drawCircle(color, r * 0.2f)
+        // Crosshair lines
+        val lineLen = r * 0.3f
+        drawLine(color, Offset(center.x, center.y - r), Offset(center.x, center.y - r + lineLen), 2.5f)
+        drawLine(color, Offset(center.x, center.y + r), Offset(center.x, center.y + r - lineLen), 2.5f)
+        drawLine(color, Offset(center.x - r, center.y), Offset(center.x - r + lineLen, center.y), 2.5f)
+        drawLine(color, Offset(center.x + r, center.y), Offset(center.x + r - lineLen, center.y), 2.5f)
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// OBJECTS LIST SHEET (vertical scrolling detected objects)
+// ══════════════════════════════════════════════════════════════════════════════
+
+@Composable
+private fun ObjectsListSheet(
+    items:     List<DetectedItem>,
+    onSelect:  (DetectedItem) -> Unit,
+    onDismiss: () -> Unit,
+    onSpeak:   () -> Unit
 ) {
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(
-                Brush.verticalGradient(listOf(Color.Transparent, Color(0xCC000000)))
+            .heightIn(max = 480.dp)
+            .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
+            .background(Brush.verticalGradient(listOf(Color(0xF0070E20), Color(0xFC03070E))))
+            .border(
+                1.dp,
+                Brush.horizontalGradient(listOf(NeonCyan.copy(0.7f), NeonPurple.copy(0.4f))),
+                RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
             )
-            .padding(horizontal = 16.dp)
-            .padding(bottom = 16.dp, top = 8.dp)
             .navigationBarsPadding()
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        items.forEach { item ->
-            val isSelected = item.id == selected?.id
-            val color      = Color(item.accentColor)
-            val pct        = (item.confidence * 100).toInt()
+        // Drag handle
+        Box(
+            modifier = Modifier
+                .padding(top = 10.dp, bottom = 8.dp)
+                .width(40.dp).height(4.dp)
+                .clip(CircleShape)
+                .background(NeonCyan.copy(0.5f))
+                .align(Alignment.CenterHorizontally)
+        )
 
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(
-                        if (isSelected) color.copy(0.25f) else Color.Black.copy(0.60f)
-                    )
-                    .border(
-                        1.5.dp,
-                        if (isSelected) color else color.copy(0.4f),
-                        RoundedCornerShape(12.dp)
-                    )
-                    .clickable { onSelect(item) }
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
+        // Header
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                TargetIcon(modifier = Modifier.size(36.dp))
+                Column {
                     Text(
-                        ObjectKnowledgeBase.getKnowledge(item.label).emoji,
-                        fontSize = 22.sp
+                        "${items.size} Objects Detected",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
                     )
                     Text(
-                        item.label,
-                        style      = MaterialTheme.typography.labelSmall,
-                        color      = if (isSelected) color else Color.White,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines   = 1
+                        "All items identified with high confidence",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.Gray
                     )
-                    // Confidence bar
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SmallRoundBtn("🔊", onClick = onSpeak)
+                SmallRoundBtn("✕", onClick = onDismiss)
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        // List of items
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(bottom = 20.dp)
+        ) {
+            items(items) { item ->
+                val color = Color(item.accentColor)
+                val pct = (item.confidence * 100).toInt()
+                val know = ObjectKnowledgeBase.getKnowledge(item.label)
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color.White.copy(0.03f))
+                        .border(1.dp, color.copy(0.2f), RoundedCornerShape(16.dp))
+                        .padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Left Icon
                     Box(
                         modifier = Modifier
-                            .width(50.dp).height(3.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(0.2f))
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(color.copy(0.15f))
+                            .border(1.dp, color.copy(0.4f), RoundedCornerShape(10.dp)),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxHeight()
-                                .fillMaxWidth(item.confidence)
-                                .background(color, CircleShape)
+                        Text(know.emoji, fontSize = 22.sp)
+                    }
+
+                    Spacer(Modifier.width(12.dp))
+
+                    // Middle details
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                know.label,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            // Confidence badge
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(color.copy(0.2f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    "$pct% confidence",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = color,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            know.description,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.LightGray,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            lineHeight = 16.sp
                         )
                     }
-                    Text("$pct%", style = MaterialTheme.typography.labelSmall, color = color)
+
+                    Spacer(Modifier.width(10.dp))
+
+                    // Right button
+                    TextButton(
+                        onClick = { onSelect(item) },
+                        contentPadding = PaddingValues(horizontal = 8.dp)
+                    ) {
+                        Text(
+                            "View Details >",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = color,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
         }
@@ -650,6 +851,12 @@ private fun ScanningIndicator() {
 // OBJECT DETAIL SHEET
 // ══════════════════════════════════════════════════════════════════════════════
 
+enum class SheetState {
+    COLLAPSED,
+    HALF,
+    EXPANDED
+}
+
 @Composable
 private fun ObjectDetailSheet(
     item:      DetectedItem,
@@ -661,10 +868,30 @@ private fun ObjectDetailSheet(
     val color = Color(item.accentColor)
     val pct   = (item.confidence * 100).toInt()
 
+    var sheetState by remember(item.id) { mutableStateOf(SheetState.COLLAPSED) }
+    val density = LocalDensity.current
+
+    val targetHeight = when (sheetState) {
+        SheetState.COLLAPSED -> 100.dp
+        SheetState.HALF -> 320.dp
+        SheetState.EXPANDED -> 620.dp
+    }
+
+    val animatedHeight by animateDpAsState(
+        targetValue = targetHeight,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "sheetHeight"
+    )
+
+    var offsetY by remember { mutableStateOf(0f) }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .fillMaxHeight(0.72f) // Premium semi-fullscreen sheet height
+            .height(animatedHeight)
             .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
             .background(
                 Brush.verticalGradient(
@@ -676,165 +903,339 @@ private fun ObjectDetailSheet(
                 Brush.horizontalGradient(listOf(color.copy(0.7f), NeonPurple.copy(0.4f))),
                 RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
             )
+            .pointerInput(item.id) {
+                detectVerticalDragGestures(
+                    onDragStart = { offsetY = 0f },
+                    onDragEnd = {
+                        val threshold = 40.dp.toPx()
+                        if (offsetY < -threshold) { // Dragged up
+                            sheetState = when (sheetState) {
+                                SheetState.COLLAPSED -> SheetState.HALF
+                                SheetState.HALF -> SheetState.EXPANDED
+                                SheetState.EXPANDED -> SheetState.EXPANDED
+                            }
+                        } else if (offsetY > threshold) { // Dragged down
+                            sheetState = when (sheetState) {
+                                SheetState.EXPANDED -> SheetState.HALF
+                                SheetState.HALF -> SheetState.COLLAPSED
+                                SheetState.COLLAPSED -> {
+                                    onDismiss()
+                                    SheetState.COLLAPSED
+                                }
+                            }
+                        }
+                    },
+                    onVerticalDrag = { change, dragAmount ->
+                        change.consume()
+                        offsetY += dragAmount
+                    }
+                )
+            }
             .navigationBarsPadding()
     ) {
         // ── Drag handle ────────────────────────────────────────────────────────
         Box(
             modifier = Modifier
-                .padding(top = 10.dp)
+                .padding(top = 10.dp, bottom = 4.dp)
                 .width(40.dp).height(4.dp)
                 .clip(CircleShape)
                 .background(color.copy(0.5f))
                 .align(Alignment.CenterHorizontally)
+                .clickable {
+                    sheetState = when (sheetState) {
+                        SheetState.COLLAPSED -> SheetState.HALF
+                        SheetState.HALF -> SheetState.EXPANDED
+                        SheetState.EXPANDED -> SheetState.HALF
+                    }
+                }
         )
 
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            // ── Header ───────────────────────────────────────────────────────
-            Row(
-                modifier              = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment     = Alignment.Top
-            ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment     = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    // Emoji icon
-                    Box(
-                        modifier = Modifier
-                            .size(56.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(color.copy(0.15f))
-                            .border(1.dp, color.copy(0.4f), RoundedCornerShape(14.dp)),
-                        contentAlignment = Alignment.Center
-                    ) { Text(know.emoji, fontSize = 28.sp) }
-
-                    Column {
-                        Text(know.label, style = MaterialTheme.typography.titleLarge, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            NeonBadge(know.category.displayName, color)
-                            NeonBadge("$pct% match", NeonGreen)
-                        }
-                    }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(start = 8.dp)) {
-                    SmallRoundBtn("🔊", onClick = onSpeak)
-                    SmallRoundBtn("✕", onClick = onDismiss)
-                }
-            }
-
-            // Confidence bar with visual indicator
-            ConfidenceBar(confidence = item.confidence, color = color)
-
-            // ─── SPECIALIZED UTILITY TRIGGER SECTION ───
-            if (know.specializedActionType != null) {
-                Spacer(Modifier.height(4.dp))
-                SpecializedActionBanner(
-                    type = know.specializedActionType,
-                    data = know.specializedActionData ?: "",
-                    onAction = {
-                        val targetRoute = when (know.specializedActionType) {
-                            "medicine" -> "medicine_scanner"
-                            "textbook" -> "student_helper_v2"
-                            "waste"    -> "waste_classifier_v2"
-                            else       -> null
-                        }
-                        if (targetRoute != null) {
-                            onDismiss()
-                            onNavigate(targetRoute)
-                        }
-                    }
+        AnimatedContent(
+            targetState = sheetState,
+            transitionSpec = {
+                (fadeIn(animationSpec = tween(220, delayMillis = 90)) +
+                        slideInVertically(initialOffsetY = { it / 4 })).togetherWith(
+                    fadeOut(animationSpec = tween(90))
                 )
-            }
-
-            // ── Description ───────────────────────────────────────────────────
-            DetailSection(title = "About / Purpose", icon = "ℹ️", color = color) {
-                Text(know.description, style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(0.9f), lineHeight = 21.sp)
-            }
-
-            // ── Uses ──────────────────────────────────────────────────────────
-            DetailSection(title = "Usage Suggestions", icon = "⚙️", color = color) {
-                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    know.uses.forEach { use ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(color))
-                            Text(use, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f))
-                        }
-                    }
-                }
-            }
-
-            // ── Safety ────────────────────────────────────────────────────────
-            DetailSection(title = "Safety & Guidelines", icon = "⚠️", color = NeonPink) {
-                Text(know.safetyInfo, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f), lineHeight = 19.sp)
-            }
-
-            // ── Maintenance ───────────────────────────────────────────────────
-            if (know.maintenanceTips.isNotEmpty()) {
-                DetailSection(title = "Maintenance & Care", icon = "🛠️", color = NeonPurple) {
-                    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                        know.maintenanceTips.forEach { tip ->
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Box(modifier = Modifier.size(5.dp).clip(CircleShape).background(NeonPurple))
-                                Text(tip, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f))
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ── Buying Guide ──────────────────────────────────────────────────
-            if (know.buyingSuggestions.isNotEmpty()) {
-                DetailSection(title = "Smart Buying Suggestions", icon = "🛒", color = NeonBlue) {
-                    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                        know.buyingSuggestions.forEach { suggestion ->
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
-                                Text("🛍️", fontSize = 11.sp, modifier = Modifier.padding(top = 1.dp))
-                                Text(suggestion, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f))
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ── Environmental ─────────────────────────────────────────────────
-            DetailSection(title = "Environmental & Carbon Impact", icon = "🌿", color = NeonGreen) {
-                Text(know.environmentalImpact, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f), lineHeight = 19.sp)
-            }
-
-            // ── Related recommendations ───────────────────────────────────────
-            if (know.relatedRecommendations.isNotEmpty()) {
-                DetailSection(title = "Related Recommendations", icon = "🔍", color = Color(0xFFFFD700)) {
+            },
+            label = "sheetContent"
+        ) { state ->
+            when (state) {
+                SheetState.COLLAPSED -> {
+                    // Mini Detection Chip
                     Row(
-                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { sheetState = SheetState.HALF }
+                            .padding(horizontal = 20.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        know.relatedRecommendations.forEach { rec ->
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment     = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
                             Box(
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Color.White.copy(0.06f))
-                                    .border(1.dp, Color.White.copy(0.12f), RoundedCornerShape(8.dp))
-                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                                    .size(42.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(color.copy(0.15f))
+                                    .border(1.dp, color.copy(0.4f), RoundedCornerShape(10.dp)),
+                                contentAlignment = Alignment.Center
+                            ) { Text(know.emoji, fontSize = 22.sp) }
+
+                            Column {
+                                Text(know.label, style = MaterialTheme.typography.titleMedium, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 2.dp)) {
+                                    NeonBadge(know.category.displayName, color)
+                                    NeonBadge("$pct% match", NeonGreen)
+                                }
+                            }
+                        }
+                        
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Swipe up for details ▴", style = MaterialTheme.typography.labelSmall, color = color.copy(0.8f))
+                            SmallRoundBtn("✕", onClick = onDismiss)
+                        }
+                    }
+                }
+                SheetState.HALF -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        // Header
+                        Row(
+                            modifier              = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment     = Alignment.Top
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment     = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
                             ) {
-                                Text(rec, style = MaterialTheme.typography.labelSmall, color = Color.White, fontWeight = FontWeight.Medium)
+                                Box(
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(color.copy(0.15f))
+                                        .border(1.dp, color.copy(0.4f), RoundedCornerShape(12.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) { Text(know.emoji, fontSize = 24.sp) }
+
+                                Column {
+                                    Text(know.label, style = MaterialTheme.typography.titleMedium, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 2.dp)) {
+                                        NeonBadge(know.category.displayName, color)
+                                        NeonBadge("$pct% match", NeonGreen)
+                                    }
+                                }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                SmallRoundBtn("🔊", onClick = onSpeak)
+                                SmallRoundBtn("✕", onClick = onDismiss)
+                            }
+                        }
+
+                        ConfidenceBar(confidence = item.confidence, color = color)
+
+                        if (know.specializedActionType != null) {
+                            SpecializedActionBanner(
+                                type = know.specializedActionType,
+                                data = know.specializedActionData ?: "",
+                                onAction = {
+                                    val targetRoute = when (know.specializedActionType) {
+                                        "calculator" -> "student_helper_v2"
+                                        "textbook"   -> "ocr_translator"
+                                        "medicine"   -> "medicine_scanner"
+                                        "waste"      -> "waste_classifier_v2"
+                                        else         -> null
+                                    }
+                                    if (targetRoute != null) {
+                                        onDismiss()
+                                        onNavigate(targetRoute)
+                                    }
+                                }
+                            )
+                        }
+
+                        DetailSection(title = "About / Purpose", icon = "ℹ️", color = color) {
+                            Text(know.description, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.9f), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { sheetState = SheetState.EXPANDED }
+                                .padding(vertical = 4.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("Swipe up or tap for full specifications ▴", style = MaterialTheme.typography.labelSmall, color = NeonBlue, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+                SheetState.EXPANDED -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 20.dp, vertical = 10.dp)
+                    ) {
+                        // Header
+                        Row(
+                            modifier              = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment     = Alignment.Top
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment     = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(color.copy(0.15f))
+                                        .border(1.dp, color.copy(0.4f), RoundedCornerShape(12.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) { Text(know.emoji, fontSize = 24.sp) }
+
+                                Column {
+                                    Text(know.label, style = MaterialTheme.typography.titleMedium, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 2.dp)) {
+                                        NeonBadge(know.category.displayName, color)
+                                        NeonBadge("$pct% match", NeonGreen)
+                                    }
+                                }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                SmallRoundBtn("🔊", onClick = onSpeak)
+                                SmallRoundBtn("✕", onClick = onDismiss)
+                            }
+                        }
+
+                        Spacer(Modifier.height(8.dp))
+                        ConfidenceBar(confidence = item.confidence, color = color)
+
+                        if (know.specializedActionType != null) {
+                            Spacer(Modifier.height(8.dp))
+                            SpecializedActionBanner(
+                                type = know.specializedActionType,
+                                data = know.specializedActionData ?: "",
+                                onAction = {
+                                    val targetRoute = when (know.specializedActionType) {
+                                        "calculator" -> "student_helper_v2"
+                                        "textbook"   -> "ocr_translator"
+                                        "medicine"   -> "medicine_scanner"
+                                        "waste"      -> "waste_classifier_v2"
+                                        else         -> null
+                                    }
+                                    if (targetRoute != null) {
+                                        onDismiss()
+                                        onNavigate(targetRoute)
+                                    }
+                                }
+                            )
+                        }
+
+                        Spacer(Modifier.height(10.dp))
+
+                        // Scrollable specifications
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            DetailSection(title = "About / Purpose", icon = "ℹ️", color = color) {
+                                Text(know.description, style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(0.9f), lineHeight = 21.sp)
+                            }
+
+                            DetailSection(title = "Usage Suggestions", icon = "⚙️", color = color) {
+                                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                    know.uses.forEach { use ->
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(color))
+                                            Text(use, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f))
+                                        }
+                                    }
+                                }
+                            }
+
+                            DetailSection(title = "Safety & Guidelines", icon = "⚠️", color = NeonPink) {
+                                Text(know.safetyInfo, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f), lineHeight = 19.sp)
+                            }
+
+                            if (know.maintenanceTips.isNotEmpty()) {
+                                DetailSection(title = "Maintenance & Care", icon = "🛠️", color = NeonPurple) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                        know.maintenanceTips.forEach { tip ->
+                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                                Box(modifier = Modifier.size(5.dp).clip(CircleShape).background(NeonPurple))
+                                                Text(tip, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (know.buyingSuggestions.isNotEmpty()) {
+                                DetailSection(title = "Smart Buying Suggestions", icon = "🛒", color = NeonBlue) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                        know.buyingSuggestions.forEach { suggestion ->
+                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
+                                                Text("🛍️", fontSize = 11.sp, modifier = Modifier.padding(top = 1.dp))
+                                                Text(suggestion, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            DetailSection(title = "Environmental & Carbon Impact", icon = "🌿", color = NeonGreen) {
+                                Text(know.environmentalImpact, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f), lineHeight = 19.sp)
+                            }
+
+                            if (know.relatedRecommendations.isNotEmpty()) {
+                                DetailSection(title = "Related Recommendations", icon = "🔍", color = Color(0xFFFFD700)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        know.relatedRecommendations.forEach { rec ->
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(Color.White.copy(0.06f))
+                                                    .border(1.dp, Color.White.copy(0.12f), RoundedCornerShape(8.dp))
+                                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                                            ) {
+                                                Text(rec, style = MaterialTheme.typography.labelSmall, color = Color.White, fontWeight = FontWeight.Medium)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            FunFactBubble(know.funFact, color)
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { sheetState = SheetState.HALF }
+                                    .padding(vertical = 12.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("Swipe down or tap to collapse ▾", style = MaterialTheme.typography.labelSmall, color = NeonBlue, fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }
                 }
             }
-
-            // ── Fun fact ──────────────────────────────────────────────────────
-            FunFactBubble(know.funFact, color)
-
-            Spacer(Modifier.height(8.dp))
         }
     }
 }
@@ -908,11 +1309,40 @@ private fun SpecializedActionBanner(
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text("📚", fontSize = 24.sp)
                         Column {
-                            Text("AI Student Helper Solver Active", style = MaterialTheme.typography.labelMedium, color = NeonCyan, fontWeight = FontWeight.Bold)
-                            Text(data.ifBlank { "Solve math homework with AI Tutor" }, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f))
+                            Text("OCR Translator Active", style = MaterialTheme.typography.labelMedium, color = NeonCyan, fontWeight = FontWeight.Bold)
+                            Text(data.ifBlank { "Scan & translate textbook content instantly" }, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f))
                         }
                     }
-                    Text("SOLVE ➔", style = MaterialTheme.typography.labelSmall, color = NeonCyan, fontWeight = FontWeight.Bold)
+                    Text("TRANSLATE ➔", style = MaterialTheme.typography.labelSmall, color = NeonCyan, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        "calculator" -> {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer(scaleX = pulseScale, scaleY = pulseScale)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(
+                        Brush.horizontalGradient(listOf(Color(0xFF0F1E36), Color(0xFF0A1424)))
+                    )
+                    .border(1.5.dp, NeonBlue, RoundedCornerShape(16.dp))
+                    .clickable(onClick = onAction)
+                    .padding(14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("🧮", fontSize = 24.sp)
+                        Column {
+                            Text("Scientific Calculator Active", style = MaterialTheme.typography.labelMedium, color = NeonBlue, fontWeight = FontWeight.Bold)
+                            Text(data.ifBlank { "Solve formulas & graphs with AI Student Helper" }, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f))
+                        }
+                    }
+                    Text("SOLVE ➔", style = MaterialTheme.typography.labelSmall, color = NeonBlue, fontWeight = FontWeight.Bold)
                 }
             }
         }

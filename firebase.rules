@@ -6,22 +6,60 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ── Scan history ─────────────────────────────────────────
-    // Users can only read/write their own scan history
-    match /scan_history/{docId} {
-      allow read, write: if request.auth != null
-                         && request.auth.uid == resource.data.userId;
-      allow create: if request.auth != null
-                    && request.auth.uid == request.resource.data.userId
-                    && request.resource.data.keys().hasAll(['id','userId','moduleType','summary','timestampMillis']);
-      allow delete: if request.auth != null
-                    && request.auth.uid == resource.data.userId;
+    // ── Legacy Users & Users collections ──────────────────────
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
-    // ── User profile ──────────────────────────────────────────
-    match /users/{userId} {
-      allow read:  if request.auth != null && request.auth.uid == userId;
-      allow write: if request.auth != null && request.auth.uid == userId;
+    match /Users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // ── New Activity collections ──────────────────────────────
+    match /StudyHistory/{docId} {
+      allow read, write: if request.auth != null && (request.resource.data.uid == request.auth.uid || resource.data.uid == request.auth.uid);
+    }
+
+    match /MedicineScans/{docId} {
+      allow read, write: if request.auth != null && (request.resource.data.uid == request.auth.uid || resource.data.uid == request.auth.uid);
+    }
+
+    match /OCRHistory/{docId} {
+      allow read, write: if request.auth != null && (request.resource.data.uid == request.auth.uid || resource.data.uid == request.auth.uid);
+    }
+
+    match /ChatHistory/{docId} {
+      allow read, write: if request.auth != null && (request.resource.data.uid == request.auth.uid || resource.data.uid == request.auth.uid);
+    }
+
+    match /Translations/{docId} {
+      allow read, write: if request.auth != null && (request.resource.data.uid == request.auth.uid || resource.data.uid == request.auth.uid);
+    }
+
+    match /ObjectDetections/{docId} {
+      allow read, write: if request.auth != null && (request.resource.data.uid == request.auth.uid || resource.data.uid == request.auth.uid);
+    }
+
+    match /WasteClassifications/{docId} {
+      allow read, write: if request.auth != null && (request.resource.data.uid == request.auth.uid || resource.data.uid == request.auth.uid);
+    }
+
+    // ── Legacy scan history ───────────────────────────────────
+    match /scan_history/{docId} {
+      allow read, update, delete: if request.auth != null 
+                                 && request.auth.uid == resource.data.userId;
+      allow create: if request.auth != null 
+                    && request.auth.uid == request.resource.data.userId;
+    }
+
+    // ── App analytics ──────────────────────────────────────────
+    match /app_analytics/{docId} {
+      allow read: if request.auth != null && 
+                  (request.auth.token.email.endsWith('@admin.com') || 
+                   request.auth.token.email.endsWith('@smartvision.ai') ||
+                   request.auth.token.email == 'guest@smartvision.ai');
+      
+      allow create, update: if request.auth != null;
     }
 
     // ── Default deny everything else ──────────────────────────

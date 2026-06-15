@@ -24,43 +24,87 @@ class SessionManager @Inject constructor(
         val USER_PHOTO_URL = stringPreferencesKey("user_photo_url")
     }
 
+    private val sharedPrefs = context.getSharedPreferences("sv_session_prefs", Context.MODE_PRIVATE)
+
+    private val _isGuestLoggedIn = MutableStateFlow(
+        sharedPrefs.getBoolean("is_guest", false) ||
+        (try {
+            com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.isAnonymous == true
+        } catch (_: Exception) {
+            false
+        })
+    )
+    val isGuestLoggedIn: StateFlow<Boolean> = _isGuestLoggedIn.asStateFlow()
+
     val onboardingCompleted: Flow<Boolean> = context.sessionDataStore.data
         .catch { emit(emptyPreferences()) }
         .map { it[Keys.ONBOARDING_COMPLETED] ?: false }
 
-    val isLoggedIn: Flow<Boolean> = context.sessionDataStore.data
-        .catch { emit(emptyPreferences()) }
-        .map { it[Keys.IS_LOGGED_IN] ?: false }
+    val isLoggedIn: Flow<Boolean> = combine(
+        context.sessionDataStore.data
+            .catch { emit(emptyPreferences()) }
+            .map { it[Keys.IS_LOGGED_IN] ?: false },
+        _isGuestLoggedIn
+    ) { dbLoggedIn, guestLoggedIn ->
+        dbLoggedIn || guestLoggedIn
+    }
 
-    val userProfile: Flow<UserProfile?> = context.sessionDataStore.data
-        .catch { emit(emptyPreferences()) }
-        .map { prefs ->
-            val loggedIn = prefs[Keys.IS_LOGGED_IN] ?: false
-            if (loggedIn) {
-                UserProfile(
-                    name = prefs[Keys.USER_NAME] ?: "Ajith Kumar",
-                    email = prefs[Keys.USER_EMAIL] ?: "Premium AI user",
-                    photoUrl = prefs[Keys.USER_PHOTO_URL]
-                )
-            } else {
-                null
-            }
+    val userProfile: Flow<UserProfile?> = combine(
+        context.sessionDataStore.data
+            .catch { emit(emptyPreferences()) }
+            .map { prefs ->
+                val loggedIn = prefs[Keys.IS_LOGGED_IN] ?: false
+                if (loggedIn) {
+                    UserProfile(
+                        name = prefs[Keys.USER_NAME] ?: "Ajith Kumar",
+                        email = prefs[Keys.USER_EMAIL] ?: "Premium AI user",
+                        photoUrl = prefs[Keys.USER_PHOTO_URL]
+                    )
+                } else {
+                    null
+                }
+            },
+        _isGuestLoggedIn
+    ) { dbProfile, guestLoggedIn ->
+        if (guestLoggedIn) {
+            UserProfile(
+                name = "Guest User",
+                email = "guest@smartvision.ai",
+                photoUrl = null
+            )
+        } else {
+            dbProfile
         }
+    }
 
     suspend fun setOnboardingCompleted(completed: Boolean) {
         context.sessionDataStore.edit { it[Keys.ONBOARDING_COMPLETED] = completed }
     }
 
-    suspend fun saveSession(profile: UserProfile) {
-        context.sessionDataStore.edit { prefs ->
-            prefs[Keys.IS_LOGGED_IN] = true
-            prefs[Keys.USER_NAME] = profile.name
-            prefs[Keys.USER_EMAIL] = profile.email
-            profile.photoUrl?.let { prefs[Keys.USER_PHOTO_URL] = it } ?: prefs.remove(Keys.USER_PHOTO_URL)
+    suspend fun saveSession(profile: UserProfile, isGuest: Boolean) {
+        sharedPrefs.edit().putBoolean("is_guest", isGuest).apply()
+        if (isGuest) {
+            _isGuestLoggedIn.value = true
+            context.sessionDataStore.edit { prefs ->
+                prefs[Keys.IS_LOGGED_IN] = false
+                prefs.remove(Keys.USER_NAME)
+                prefs.remove(Keys.USER_EMAIL)
+                prefs.remove(Keys.USER_PHOTO_URL)
+            }
+        } else {
+            _isGuestLoggedIn.value = false
+            context.sessionDataStore.edit { prefs ->
+                prefs[Keys.IS_LOGGED_IN] = true
+                prefs[Keys.USER_NAME] = profile.name
+                prefs[Keys.USER_EMAIL] = profile.email
+                profile.photoUrl?.let { prefs[Keys.USER_PHOTO_URL] = it } ?: prefs.remove(Keys.USER_PHOTO_URL)
+            }
         }
     }
 
     suspend fun clearSession() {
+        sharedPrefs.edit().putBoolean("is_guest", false).apply()
+        _isGuestLoggedIn.value = false
         context.sessionDataStore.edit { prefs ->
             prefs[Keys.IS_LOGGED_IN] = false
             prefs.remove(Keys.USER_NAME)

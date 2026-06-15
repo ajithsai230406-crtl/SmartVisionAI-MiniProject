@@ -5,6 +5,7 @@ import android.speech.tts.TextToSpeech
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.smartvision.ai.data.repository.HistoryRepository
+import com.smartvision.ai.data.repository.FirebaseRepository
 import com.smartvision.ai.translator.data.SmartTranslatorRepository
 import com.smartvision.ai.translator.domain.*
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -18,6 +19,7 @@ import javax.inject.Inject
 class TextTranslatorViewModel @Inject constructor(
     private val repo:        SmartTranslatorRepository,
     private val historyRepo: HistoryRepository,
+    private val firebaseRepository: FirebaseRepository,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -87,6 +89,14 @@ class TextTranslatorViewModel @Inject constructor(
                     _sourceLang.value = result.detectedLang
                     _recentTranslations.update { (listOf(result) + it).take(15) }
                     historyRepo.save("Translation", "${result.detectedLang.flag} → ${result.targetLang.flag} ${result.translatedText.take(60)}", result.originalText.take(200))
+                    viewModelScope.launch {
+                        firebaseRepository.saveTranslation(
+                            sourceText = result.originalText,
+                            translatedText = result.translatedText,
+                            sourceLang = result.detectedLang.displayName,
+                            targetLang = result.targetLang.displayName
+                        )
+                    }
                     // Auto-fetch explanation
                     fetchExplanation(result)
                 }
@@ -123,6 +133,10 @@ class TextTranslatorViewModel @Inject constructor(
         val locale = try { Locale.forLanguageTag(langCode) } catch (e: Exception) { Locale.ENGLISH }
         tts?.language = locale
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
+    }
+
+    fun stopSpeaking() {
+        tts?.stop()
     }
 
     override fun onCleared() { super.onCleared(); tts?.stop(); tts?.shutdown() }

@@ -1,35 +1,27 @@
 package com.smartvision.ai.data.repository
 
 import android.graphics.Bitmap
-import com.google.ai.client.generativeai.GenerativeModel
-import com.google.ai.client.generativeai.type.content
-import com.smartvision.ai.BuildConfig
 import com.smartvision.ai.domain.models.*
 import com.smartvision.ai.domain.usecase.ClassifyWasteUseCase
-import com.smartvision.ai.util.retryWithDelay
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class ClassifyWasteUseCaseImpl @Inject constructor() : ClassifyWasteUseCase {
-
-    private val model by lazy {
-        GenerativeModel(modelName = "gemini-1.5-flash", apiKey = BuildConfig.GEMINI_API_KEY)
-    }
+class ClassifyWasteUseCaseImpl @Inject constructor(
+    private val openRouterManager: OpenRouterManager
+) : ClassifyWasteUseCase {
 
     override suspend fun invoke(bitmap: Bitmap): ScanResult = try {
         val promptText = "Classify this waste item as Recyclable, Organic, or Non-recyclable. Be brief."
-        
+
         val responseText = try {
-            val response = retryWithDelay(retries = 3) {
-                model.generateContent(content {
-                    image(bitmap)
-                    text(promptText)
-                })
-            }
-            response.text ?: "recyclable"
+            openRouterManager.generateContent(
+                prompt = promptText,
+                image = bitmap,
+                modelName = "openrouter/auto"
+            )
         } catch (e: Exception) {
-            // Local fallback classification based on average bitmap colors
+            // Local fallback classification based on average bitmap colors when offline or error occurs
             val w = bitmap.width
             val h = bitmap.height
             var rSum = 0L; var gSum = 0L; var bSum = 0L
@@ -54,7 +46,7 @@ class ClassifyWasteUseCaseImpl @Inject constructor() : ClassifyWasteUseCase {
                 else -> "recyclable"
             }
         }
-        
+
         val reply = responseText.lowercase()
         val (rec, org, nonRec) = when {
             "non-recyclable" in reply || "non recyclable" in reply || "trash" in reply || "landfill" in reply || "hazardous" in reply -> Triple(0.10f, 0.05f, 0.85f)
@@ -69,7 +61,7 @@ class ClassifyWasteUseCaseImpl @Inject constructor() : ClassifyWasteUseCase {
                 WasteCategory("Non-recyclable",  nonRec, 0xFFFF1744)
             )
         )
-    } catch (e: Exception) { 
-        ScanResult.Error(e.message ?: "Classification failed") 
+    } catch (e: Exception) {
+        ScanResult.Error(e.message ?: "Classification failed")
     }
 }

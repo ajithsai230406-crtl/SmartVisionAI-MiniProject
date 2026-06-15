@@ -1,15 +1,24 @@
 [versions]
-agp               = "8.7.3"
+agp               = "8.8.2"
 kotlin            = "2.1.0"
 hilt              = "2.55"
 googleServices    = "4.4.2"
 room              = "2.8.4"
 ksp               = "2.1.0-1.0.29"
 firebaseBom       = "33.7.0"
+firebaseCrashlytics = "3.0.2"
 generativeai      = "0.9.0"
 accompanist       = "0.37.2"
+retrofit            = "2.11.0"
+okhttp              = "4.12.0"
+litert              = "1.4.2"
+litertSupport       = "1.4.2"
+
 
 [libraries]
+retrofit-core = { group = "com.squareup.retrofit2", name = "retrofit", version.ref = "retrofit" }
+retrofit-converter-gson = { group = "com.squareup.retrofit2", name = "converter-gson", version.ref = "retrofit" }
+okhttp-logging = { group = "com.squareup.okhttp3", name = "logging-interceptor", version.ref = "okhttp" }
 # Hilt
 hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref = "hilt" }
 hilt-compiler = { group = "com.google.dagger", name = "hilt-compiler", version.ref = "hilt" }
@@ -26,13 +35,22 @@ firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.r
 firebase-auth = { group = "com.google.firebase", name = "firebase-auth-ktx" }
 firebase-firestore = { group = "com.google.firebase", name = "firebase-firestore-ktx" }
 firebase-storage = { group = "com.google.firebase", name = "firebase-storage-ktx" }
+firebase-analytics = { group = "com.google.firebase", name = "firebase-analytics-ktx" }
+firebase-crashlytics = { group = "com.google.firebase", name = "firebase-crashlytics-ktx" }
 
 # AI & ML
 google-generativeai = { group = "com.google.ai.client.generativeai", name = "generativeai", version.ref = "generativeai" }
 mlkit-barcode-scanning = { group = "com.google.mlkit", name = "barcode-scanning", version = "17.3.0" }
 mlkit-text-recognition = { group = "com.google.mlkit", name = "text-recognition", version = "16.0.1" }
+mlkit-text-recognition-chinese = { group = "com.google.mlkit", name = "text-recognition-chinese", version = "16.0.1" }
+mlkit-text-recognition-devanagari = { group = "com.google.mlkit", name = "text-recognition-devanagari", version = "16.0.1" }
+mlkit-text-recognition-japanese = { group = "com.google.mlkit", name = "text-recognition-japanese", version = "16.0.1" }
+mlkit-text-recognition-korean = { group = "com.google.mlkit", name = "text-recognition-korean", version = "16.0.1" }
 mlkit-image-labeling = { group = "com.google.mlkit", name = "image-labeling", version = "17.0.9" }
 mlkit-object-detection = { group = "com.google.mlkit", name = "object-detection", version = "17.0.2" }
+
+litert = { group = "com.google.ai.edge.litert", name = "litert", version.ref = "litert" }
+litert-support = { group = "com.google.ai.edge.litert", name = "litert-support", version.ref = "litertSupport" }
 
 # Accompanist
 accompanist-permissions = { group = "com.google.accompanist", name = "accompanist-permissions", version.ref = "accompanist" }
@@ -43,4 +61,5 @@ kotlin-android      = { id = "org.jetbrains.kotlin.android",  version.ref = "kot
 kotlin-compose      = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin"   }
 hilt-android        = { id = "com.google.dagger.hilt.android", version.ref = "hilt"          }
 google-services     = { id = "com.google.gms.google-services", version.ref = "googleServices"}
+firebase-crashlytics = { id = "com.google.firebase.crashlytics", version.ref = "firebaseCrashlytics" }
 ksp                 = { id = "com.google.devtools.ksp",       version.ref = "ksp"            }

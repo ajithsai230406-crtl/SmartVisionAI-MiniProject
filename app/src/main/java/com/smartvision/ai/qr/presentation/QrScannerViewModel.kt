@@ -15,10 +15,12 @@ import com.smartvision.ai.qr.data.QrScannerRepository
 import com.smartvision.ai.qr.domain.*
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 
@@ -45,9 +47,9 @@ class QrScannerViewModel @Inject constructor(
     private var cooldownJob: Job? = null
 
     // ── Live frame scan ────────────────────────────────────────────────────────
-    suspend fun analyzeFrame(image: Image, rotation: Int) {
-        if (!analysisLock.compareAndSet(false, true)) return
-        if (_scanState.value is QrScanState.Success) { analysisLock.set(false); return }
+    suspend fun analyzeFrame(image: Image, rotation: Int) = withContext(Dispatchers.Default) {
+        if (!analysisLock.compareAndSet(false, true)) return@withContext
+        if (_scanState.value is QrScanState.Success) { analysisLock.set(false); return@withContext }
         try {
             repo.scanFromImage(image, rotation)
                 .onSuccess { code ->

@@ -12,6 +12,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.smartvision.ai.data.repository.HistoryRepository
+import com.smartvision.ai.data.repository.FirebaseRepository
 import com.smartvision.ai.translator.data.SmartTranslatorRepository
 import com.smartvision.ai.translator.domain.*
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -25,6 +26,7 @@ import javax.inject.Inject
 class VoiceTranslatorViewModel @Inject constructor(
     private val repo:        SmartTranslatorRepository,
     private val historyRepo: HistoryRepository,
+    private val firebaseRepository: FirebaseRepository,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -68,6 +70,10 @@ class VoiceTranslatorViewModel @Inject constructor(
     // ── Start listening from a channel ────────────────────────────────────────
     fun startListening(isLeft: Boolean) {
         if (_listeningState.value == VoiceListeningState.LISTENING) { stopListening(); return }
+        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+            _error.value = "Speech recognition is not available on this device"
+            return
+        }
         _activeChannel.value   = isLeft
         _listeningState.value  = VoiceListeningState.LISTENING
         _partialText.value     = ""
@@ -148,6 +154,14 @@ class VoiceTranslatorViewModel @Inject constructor(
                     // Auto-play translation
                     speak(result.translatedText, tgtLang.code)
                     historyRepo.save("Voice", "${srcLang.flag}→${tgtLang.flag} $spokenText", result.translatedText.take(200))
+                    viewModelScope.launch {
+                        firebaseRepository.saveTranslation(
+                            sourceText = spokenText,
+                            translatedText = result.translatedText,
+                            sourceLang = srcLang.displayName,
+                            targetLang = tgtLang.displayName
+                        )
+                    }
                 }
                 .onFailure { _error.value = it.message ?: "Translation failed" }
             _listeningState.value = VoiceListeningState.IDLE

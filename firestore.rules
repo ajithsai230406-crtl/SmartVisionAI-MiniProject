@@ -1,0 +1,67 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── User Data ────────────────────────────────────────────────────────────
+    // Users can only read/write their own data.
+    // Each user has their own document and sub-collections.
+
+    match /users/{userId} {
+      // User profile document: only the owner can read/write
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+      // OCR Scans — users/{uid}/ocr_scans/{docId}
+      match /ocr_scans/{docId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      // Medicine Scans — users/{uid}/medicine_scans/{docId}
+      match /medicine_scans/{docId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      // Medicine Stats — users/{uid}/medicine_stats/{docId}
+      match /medicine_stats/{docId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      // Waste Scans — users/{uid}/waste_scans/{docId}
+      match /waste_scans/{docId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      // Student Sessions — users/{uid}/student_sessions/{docId}
+      match /student_sessions/{docId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      // Object Detections — users/{uid}/object_detections/{docId}
+      match /object_detections/{docId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+
+    // ─── Generic Scan History ─────────────────────────────────────────────────
+    // Legacy encrypted scan_history collection — users see only their own records
+    match /scan_history/{docId} {
+      allow create: if request.auth != null
+                    && request.resource.data.userId == request.auth.uid;
+      allow read, delete: if request.auth != null
+                          && resource.data.userId == request.auth.uid;
+    }
+
+    // ─── Anonymized Analytics (Developer Dashboard) ───────────────────────────
+    // Any authenticated user can increment global counters (no PII stored here).
+    // Only the app service account can read (enforced at the dashboard layer).
+    match /app_analytics/{docId} {
+      allow write: if request.auth != null;
+      // Restrict reads to service account / admin SDK only (deny from client)
+      allow read: if false;
+    }
+
+    // ─── Deny everything else ─────────────────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

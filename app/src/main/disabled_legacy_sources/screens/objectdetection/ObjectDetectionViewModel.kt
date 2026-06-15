@@ -10,14 +10,12 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
-
 data class ObjectDetectionState(
     val result:          ScanResult?          = null,
     val imagePath:       String?              = null,
     val isLoading:       Boolean              = false,
     val error:           String?              = null
 )
-
 @HiltViewModel
 class ObjectDetectionViewModel @Inject constructor(
     private val detectObjects: DetectObjectsUseCase,
@@ -85,7 +83,6 @@ class ObjectDetectionViewModel @Inject constructor(
             saveScan("object_detection", "${objects.size} objects: $labelsText")
         }
     }
-
     fun clearResults() {
         _uiState.update { it.copy(result = null) }
     }

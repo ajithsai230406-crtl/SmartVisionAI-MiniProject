@@ -149,7 +149,7 @@ object ObjectKnowledgeBase {
             maintenanceTips = listOf("Clean keyboard gaps with compressed air", "Avoid direct screen exposure to intense sunlight", "Wipe casing with a microfiber cloth"),
             buyingSuggestions = listOf("Casio fx-991EX ClassWiz for algebraic work", "TI-30XS MultiView for basic high-school science"),
             relatedRecommendations = listOf("Graphing Notebook", "Engineering Ruler Set", "Mechanical Pencil 0.5mm"),
-            specializedActionType = "textbook", // triggers Student Helper Homework Solver!
+            specializedActionType = "calculator", // triggers Student Helper Homework Solver!
             specializedActionData = "Math & Engineering Companion Mode"
         ),
 
@@ -316,6 +316,45 @@ object ObjectKnowledgeBase {
             emoji       = "📱",
             specializedActionType = "electronics",
             specializedActionData = "Rechargeable Lithium-Ion battery · Screen time safety triggers active"
+        ),
+        "remote" to ObjectKnowledge(
+            label       = "Remote Control",
+            category    = ObjectCategory.ELECTRONICS,
+            description = "IR remote control for TV/entertainment system. Multiple function buttons for device control",
+            uses        = listOf("Channel navigation", "Volume adjustments", "System settings access"),
+            safetyInfo  = "Keep batteries enclosed in secure battery compartment. Keep away from small children.",
+            environmentalImpact = "Dispose of exhausted alkaline batteries at verified recycling centers.",
+            funFact     = "The first TV remote control, called 'Lazy Bones', was developed by Zenith Radio Corporation in 1950.",
+            emoji       = "🕹️",
+            maintenanceTips = listOf("Clean button gaps with a dry toothbrush", "Avoid severe drop impacts"),
+            buyingSuggestions = listOf("Consider universal remote controls for multi-device compatibility"),
+            relatedRecommendations = listOf("Rechargeable AAA batteries", "Remote holder dock")
+        ),
+        "mouse" to ObjectKnowledge(
+            label       = "Computer Mouse",
+            category    = ObjectCategory.ELECTRONICS,
+            description = "Wireless/Wired computer mouse. Pointing device for navigation",
+            uses        = listOf("Computer GUI navigation", "Precision design work", "Gaming controls"),
+            safetyInfo  = "Use an ergonomic mouse pad to prevent repetitive strain injuries.",
+            environmentalImpact = "Recycle at certified electronic waste centers.",
+            funFact     = "The computer mouse was invented by Douglas Engelbart in 1963 and was made of wood.",
+            emoji       = "🖱️",
+            maintenanceTips = listOf("Clean sensor lens with compressed air", "Wipe plastic casing with a dry cloth"),
+            buyingSuggestions = listOf("Look for optical vertical mice for ergonomic health"),
+            relatedRecommendations = listOf("Ergonomic mouse pad", "USB receiver extension cable")
+        ),
+        "phone" to ObjectKnowledge(
+            label       = "Smartphone",
+            category    = ObjectCategory.ELECTRONICS,
+            description = "Mobile phone with touchscreen display. Communication and computing device",
+            uses        = listOf("Voice calling and chat", "Web browsing", "Mobile photography"),
+            safetyInfo  = "Keep away from flammable areas while charging. Do not view screen in complete darkness.",
+            environmentalImpact = "Contains rare earth metals. Recycle strictly at dedicated e-waste points.",
+            funFact     = "The first smartphone, IBM Simon, was released in 1994 and featured a stylus.",
+            emoji       = "📱",
+            maintenanceTips = listOf("Use a screen protector and shockproof case", "Keep screen clean with microfiber cloth"),
+            buyingSuggestions = listOf("Check battery capacity and RAM specifications"),
+            relatedRecommendations = listOf("Tempered glass protector", "Fast charging block")
         ),
         "laptop" to ObjectKnowledge(
             label       = "Laptop",

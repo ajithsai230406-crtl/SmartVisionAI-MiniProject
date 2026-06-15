@@ -35,3 +35,11 @@ data class UserProfile(
     val email: String = "Premium AI user",
     val photoUrl: String? = null
 )
+
+data class ChatHistoryItem(
+    val id: String = "",
+    val uid: String = "",
+    val userMessage: String = "",
+    val aiResponse: String = "",
+    val timestamp: Long = 0L
+)

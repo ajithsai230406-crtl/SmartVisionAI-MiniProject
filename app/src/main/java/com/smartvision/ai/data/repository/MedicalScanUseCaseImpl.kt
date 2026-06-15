@@ -1,26 +1,19 @@
 package com.smartvision.ai.data.repository
 
 import android.graphics.Bitmap
-import com.google.ai.client.generativeai.GenerativeModel
-import com.google.ai.client.generativeai.type.content
-import com.smartvision.ai.BuildConfig
 import com.smartvision.ai.data.db.GeminiCacheDao
 import com.smartvision.ai.data.db.GeminiCacheEntity
 import com.smartvision.ai.domain.models.ScanResult
 import com.smartvision.ai.domain.usecase.MedicalScanUseCase
-import com.smartvision.ai.util.retryWithDelay
 import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class MedicalScanUseCaseImpl @Inject constructor(
+    private val openRouterManager: OpenRouterManager,
     private val cacheDao: GeminiCacheDao
 ) : MedicalScanUseCase {
-
-    private val model by lazy {
-        GenerativeModel(modelName = "gemini-1.5-flash", apiKey = BuildConfig.GEMINI_API_KEY)
-    }
 
     private fun getBitmapHash(bitmap: Bitmap): Int {
         var hash = 17
@@ -49,14 +42,11 @@ If not medicine: {"error":"Not a medicine image"}"""
         val raw = if (cached != null) {
             cached.response
         } else {
-            // Exponential backoff remote retry call
-            val response = retryWithDelay(retries = 3) {
-                model.generateContent(content {
-                    image(bitmap)
-                    text(promptText)
-                })
-            }
-            val jsonText = response.text?.trim() ?: throw Exception("No response")
+            val jsonText = openRouterManager.generateContent(
+                prompt = promptText,
+                image = bitmap,
+                modelName = "openrouter/auto"
+            )
             cacheDao.insertCache(GeminiCacheEntity(cacheKey, "MedicineImageHash:$imgHash", jsonText))
             jsonText
         }
@@ -64,7 +54,7 @@ If not medicine: {"error":"Not a medicine image"}"""
         // Fortified JSON parser cleanup
         val cleaned = raw.removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
         val json = JSONObject(cleaned)
-        
+
         if (json.has("error")) {
             ScanResult.Error(json.getString("error"))
         } else {
@@ -76,7 +66,12 @@ If not medicine: {"error":"Not a medicine image"}"""
                 warnings     = json.optJSONArray("warnings")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
             )
         }
-    } catch (e: Exception) { 
-        ScanResult.Error(e.message ?: "Medical scan failed") 
+    } catch (e: Exception) {
+        val offlineMsg = if (e is OpenRouterError.Offline || e is OpenRouterError.NetworkTimeout) {
+            "⚠️ Offline Mode: Medical scan unavailable. Please check your internet connection."
+        } else {
+            e.message ?: "Medical scan failed"
+        }
+        ScanResult.Error(offlineMsg)
     }
 }

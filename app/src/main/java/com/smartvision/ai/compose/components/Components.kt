@@ -258,7 +258,7 @@ fun ModuleCard(
 
     Box(
         modifier = modifier
-            .aspectRatio(1f)
+            .height(115.dp)
             .graphicsLayer { scaleX = scaleAnim; scaleY = scaleAnim }
             .clip(shape)
             .background(cardBg)
@@ -274,7 +274,7 @@ fun ModuleCard(
                 shape
             )
             .clickable(onClick = onClick)
-            .padding(12.dp),
+            .padding(10.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(
@@ -284,7 +284,7 @@ fun ModuleCard(
             // Icon circle with radial glow background
             Box(
                 modifier = Modifier
-                    .size(48.dp)
+                    .size(44.dp)
                     .clip(CircleShape)
                     .background(
                         Brush.radialGradient(
@@ -301,13 +301,15 @@ fun ModuleCard(
             }
             Spacer(Modifier.height(8.dp))
             Text(
-                text   = title,
-                style  = MaterialTheme.typography.labelMedium,
-                color  = MaterialTheme.colorScheme.onSurface,
+                text         = title,
+                style        = MaterialTheme.typography.bodyMedium,
+                color        = MaterialTheme.colorScheme.onSurface,
                 textAlign    = TextAlign.Center,
                 maxLines     = 2,
                 overflow     = TextOverflow.Ellipsis,
-                fontWeight   = FontWeight.Medium
+                fontWeight   = FontWeight.Bold,
+                fontSize     = 13.sp,
+                lineHeight   = 16.sp
             )
         }
     }

@@ -3,5 +3,5 @@
     <string name="app_name">Smart Vision AI</string>
     <string name="tagline">See Smarter with AI</string>
     <string name="firebase_setup_note">Replace app/google-services.json with your Firebase console file for live Google login.</string>
-    <string name="default_web_client_id">your_web_client_id_here</string>
+    <string name="default_web_client_id">532064243044-3geh8ltk07ithb7o3ru4n94edeignmt2.apps.googleusercontent.com</string>
 </resources>

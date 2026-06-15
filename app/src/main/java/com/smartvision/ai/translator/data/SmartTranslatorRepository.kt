@@ -1,8 +1,6 @@
 package com.smartvision.ai.translator.data
 
 import android.content.Context
-import com.google.ai.client.generativeai.GenerativeModel
-import com.google.ai.client.generativeai.type.content
 import com.google.mlkit.nl.languageid.LanguageIdentification
 import com.google.mlkit.nl.translate.TranslateLanguage
 import com.google.mlkit.nl.translate.Translation
@@ -10,6 +8,7 @@ import com.google.mlkit.nl.translate.TranslatorOptions
 import com.smartvision.ai.BuildConfig
 import com.smartvision.ai.data.db.GeminiCacheDao
 import com.smartvision.ai.data.db.GeminiCacheEntity
+import com.smartvision.ai.data.repository.OpenRouterManager
 import com.smartvision.ai.translator.domain.*
 import com.smartvision.ai.util.NetworkMonitor
 import com.smartvision.ai.util.retryWithDelay
@@ -26,13 +25,11 @@ import javax.inject.Singleton
 class SmartTranslatorRepository @Inject constructor(
     private val cacheDao: GeminiCacheDao,
     @ApplicationContext private val context: Context,
-    private val networkMonitor: NetworkMonitor
+    private val networkMonitor: NetworkMonitor,
+    private val openRouterManager: OpenRouterManager
 ) {
 
     private val langId     = LanguageIdentification.getClient()
-    private val geminiModel by lazy {
-        GenerativeModel(modelName = "gemini-1.5-flash", apiKey = BuildConfig.GEMINI_API_KEY)
-    }
 
     // ── Local Phrase Database Structure ─────────────────────────────────────────
     private data class OfflineSemanticEntry(
@@ -72,30 +69,70 @@ class SmartTranslatorRepository @Inject constructor(
         text:       String,
         sourceLang: Language,    // "auto" if source.code == "auto"
         targetLang: Language
-    ): Result<TranslationResult> = runCatching {
-        require(text.isNotBlank()) { "Please enter text to translate." }
+    ): Result<TranslationResult> = withContext(Dispatchers.IO) {
+        runCatching {
+            require(text.isNotBlank()) { "Please enter text to translate." }
 
-        // 1. Detect source language
-        val detectedCode = if (sourceLang.code == "auto") {
-            langId.identifyLanguage(text).await().takeIf { it != "und" } ?: "en"
-        } else sourceLang.code
+            // 1. Detect source language
+            val detectedCode = if (sourceLang.code == "auto") {
+                langId.identifyLanguage(text).await().takeIf { it != "und" } ?: "en"
+            } else sourceLang.code
 
-        val detectedLang = languageByCode(detectedCode)
+            val detectedLang = languageByCode(detectedCode)
 
-        // 2. Build ML Kit translator
-        val srcMlKit = mlKitCode(detectedCode)
-        val tgtMlKit = mlKitCode(targetLang.code)
+            // 2. Build ML Kit translator
+            val srcMlKit = mlKitCode(detectedCode)
+            val tgtMlKit = mlKitCode(targetLang.code)
 
-        // If same language, return original
-        if (srcMlKit == tgtMlKit) {
+            // If same language, return original
+            if (srcMlKit == tgtMlKit) {
+                val isOnline = networkMonitor.isOnline()
+                val semanticMeaning = runCatching {
+                    generateSemanticMeaning(text, text, detectedLang, targetLang, isOnline)
+                }.getOrNull()
+
+                return@runCatching TranslationResult(
+                    originalText    = text,
+                    translatedText  = text,
+                    detectedLang    = detectedLang,
+                    targetLang      = targetLang,
+                    pronunciation   = semanticMeaning?.pronunciation,
+                    nativeMeaning   = semanticMeaning?.meaningOriginal,
+                    semanticMeaning = semanticMeaning,
+                    isOfflineMode   = !isOnline
+                )
+            }
+
+            val translated = try {
+                val options    = TranslatorOptions.Builder().setSourceLanguage(srcMlKit).setTargetLanguage(tgtMlKit).build()
+                val translator = Translation.getClient(options)
+                
+                // Wrap model downloading and translation in retries
+                val res = retryWithDelay(retries = 3) {
+                    translator.downloadModelIfNeeded().await()
+                    translator.translate(text).await()
+                }
+                translator.close()
+                res
+            } catch (e: Exception) {
+                if (networkMonitor.isOnline()) {
+                    val prompt = "Translate the following text from ${detectedLang.displayName} to ${targetLang.displayName}. Return ONLY the translated text, nothing else.\nText:\n$text"
+                    val responseText = openRouterManager.generateContent(prompt, modelName = "openrouter/auto")
+                    responseText.trim()
+                } else {
+                    throw e
+                }
+            }
+
+            // 3. Generate Semantic Meaning and Explanation automatically
             val isOnline = networkMonitor.isOnline()
             val semanticMeaning = runCatching {
-                generateSemanticMeaning(text, text, detectedLang, targetLang, isOnline)
+                generateSemanticMeaning(text, translated, detectedLang, targetLang, isOnline)
             }.getOrNull()
 
-            return@runCatching TranslationResult(
+            TranslationResult(
                 originalText    = text,
-                translatedText  = text,
+                translatedText  = translated,
                 detectedLang    = detectedLang,
                 targetLang      = targetLang,
                 pronunciation   = semanticMeaning?.pronunciation,
@@ -104,33 +141,6 @@ class SmartTranslatorRepository @Inject constructor(
                 isOfflineMode   = !isOnline
             )
         }
-
-        val options    = TranslatorOptions.Builder().setSourceLanguage(srcMlKit).setTargetLanguage(tgtMlKit).build()
-        val translator = Translation.getClient(options)
-        
-        // Wrap model downloading and translation in retries
-        val translated = retryWithDelay(retries = 3) {
-            translator.downloadModelIfNeeded().await()
-            translator.translate(text).await()
-        }
-        translator.close()
-
-        // 3. Generate Semantic Meaning and Explanation automatically
-        val isOnline = networkMonitor.isOnline()
-        val semanticMeaning = runCatching {
-            generateSemanticMeaning(text, translated, detectedLang, targetLang, isOnline)
-        }.getOrNull()
-
-        TranslationResult(
-            originalText    = text,
-            translatedText  = translated,
-            detectedLang    = detectedLang,
-            targetLang      = targetLang,
-            pronunciation   = semanticMeaning?.pronunciation,
-            nativeMeaning   = semanticMeaning?.meaningOriginal,
-            semanticMeaning = semanticMeaning,
-            isOfflineMode   = !isOnline
-        )
     }
 
     // ── Language identification only ───────────────────────────────────────────
@@ -163,10 +173,7 @@ class SmartTranslatorRepository @Inject constructor(
 
             // 2. Fetch remote via Gemini with exponential retries
             runCatching {
-                val response = retryWithDelay(retries = 3) {
-                    geminiModel.generateContent(content { text(prompt) })
-                }
-                val responseText = response.text ?: throw Exception("Empty AI response")
+                val responseText = openRouterManager.generateContent(prompt, modelName = "openrouter/auto")
                 val meaning = parseSemanticMeaning(responseText, original, srcLang)
 
                 // Cache successfully resolved meanings

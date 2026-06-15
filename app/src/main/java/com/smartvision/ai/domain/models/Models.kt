@@ -8,7 +8,7 @@ enum class ModuleType(val title: String, val subtitle: String, val route: String
     TEXT_SCANNER    ("Text Scanner (OCR)", "Extract text — copy, translate, speak",   "text_scanner"),
     TRANSLATOR      ("Translator",         "Translate text in real-time",              "translator"),
     VOICE_TRANSLATOR("Voice Translator",   "Speak & translate instantly",             "voice_translator"),
-    STUDENT_HELPER  ("Student Helper",     "Solve questions with Gemini AI",          "student_helper"),
+    STUDENT_HELPER  ("Student Helper",     "Solve questions with OpenRouter AI",      "student_helper"),
     MEDICAL_SCANNER ("Medical Scanner",    "Scan medicine strips for dosage & info",  "medical_scanner"),
     WASTE_CLASSIFIER("Waste Classifier",   "Identify recyclable / organic waste",     "waste_classifier"),
     QR_SCANNER      ("QR Scanner",         "Scan QR codes — auto-open links",         "qr_scanner")

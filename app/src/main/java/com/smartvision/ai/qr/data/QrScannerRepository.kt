@@ -8,6 +8,8 @@ import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
 import com.smartvision.ai.qr.domain.*
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -22,18 +24,22 @@ class QrScannerRepository @Inject constructor() {
 
     /** Live camera frame analysis */
     suspend fun scanFromImage(image: Image, rotation: Int): Result<ScannedCode?> =
-        runCatching {
-            val input   = InputImage.fromMediaImage(image, rotation)
-            val results = scanner.process(input).await()
-            results.firstOrNull()?.toScannedCode()
+        withContext(Dispatchers.Default) {
+            runCatching {
+                val input   = InputImage.fromMediaImage(image, rotation)
+                val results = scanner.process(input).await()
+                results.firstOrNull()?.toScannedCode()
+            }
         }
 
     /** Bitmap-based scan (gallery) */
     suspend fun scanFromBitmap(bitmap: android.graphics.Bitmap): Result<ScannedCode?> =
-        runCatching {
-            val input   = InputImage.fromBitmap(bitmap, 0)
-            val results = scanner.process(input).await()
-            results.firstOrNull()?.toScannedCode()
+        withContext(Dispatchers.Default) {
+            runCatching {
+                val input   = InputImage.fromBitmap(bitmap, 0)
+                val results = scanner.process(input).await()
+                results.firstOrNull()?.toScannedCode()
+            }
         }
 
     // ── ML Kit Barcode → Domain ───────────────────────────────────────────────

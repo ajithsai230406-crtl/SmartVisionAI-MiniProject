@@ -1,105 +1,154 @@
 package com.example.smartvisionai.ml
 
-import com.google.ai.client.generativeai.GenerativeModel
-import com.google.ai.client.generativeai.type.content
 import com.smartvision.ai.BuildConfig
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
+import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class GeminiRepository @Inject constructor() {
 
-    private val model = GenerativeModel(
-        modelName = "gemini-pro",
-        apiKey = BuildConfig.GEMINI_API_KEY
-    )
+    private val client = OkHttpClient()
 
-    // ── Student Helper ────────────────────────────────────────────────────────
-    suspend fun explainForStudent(questionText: String): String {
+    private suspend fun askAI(prompt: String): String =
+        withContext(Dispatchers.IO) {
+
+            try {
+
+                val json = JSONObject().apply {
+
+                    put(
+                        "model",
+                        "openrouter/auto"
+                    )
+
+                    put(
+                        "messages",
+                        JSONArray().put(
+                            JSONObject().apply {
+                                put("role", "user")
+                                put("content", prompt)
+                            }
+                        )
+                    )
+                }
+                android.util.Log.d(
+                    "OPENROUTER_MODEL",
+                    json.toString()
+                )
+
+                val body =
+                    json.toString()
+                        .toRequestBody(
+                            "application/json"
+                                .toMediaType()
+                        )
+
+                val request = Request.Builder()
+                    .url("https://openrouter.ai/api/v1/chat/completions")
+                    .addHeader(
+                        "Authorization",
+                        "Bearer ${BuildConfig.OPENROUTER_API_KEY}"
+                    )
+                    .addHeader(
+                        "Content-Type",
+                        "application/json"
+                    )
+                    .post(body)
+                    .build()
+
+                val response =
+                    client.newCall(request).execute()
+
+                val responseBody =
+                    response.body?.string()
+                        ?: return@withContext "No response"
+
+                JSONObject(responseBody)
+                    .getJSONArray("choices")
+                    .getJSONObject(0)
+                    .getJSONObject("message")
+                    .getString("content")
+
+            } catch (e: Exception) {
+
+                "AI Error: ${e.message}"
+            }
+        }
+
+    suspend fun explainForStudent(
+        questionText: String
+    ): String {
+
         val prompt = """
-            You are a friendly student assistant. A student has scanned this text:
-            
-            "$questionText"
-            
-            Please:
-            1. Identify if this is a question, formula, or concept
-            2. Provide a clear, simple explanation
-            3. Give step-by-step solution if it's a problem
-            4. Use simple language suitable for students
-            
-            Keep the response concise and well-structured.
+            You are a friendly student assistant.
+
+            Question:
+
+            $questionText
+
+            Provide:
+            1. Direct answer
+           2. Step-by-step Solution
+           3. Explanation
+           4. Formula Used
+           5. Example
+           6. Final Answer
+
+           Make the response easy for engineering students.
         """.trimIndent()
 
-        return try {
-            val response = model.generateContent(content { text(prompt) })
-            response.text ?: "Could not generate explanation."
-        } catch (e: Exception) {
-            "⚠ Gemini unavailable. Check your API key and internet connection.\n\nScanned text:\n$questionText"
-        }
+        return askAI(prompt)
     }
 
-    // ── Medicine Analysis ─────────────────────────────────────────────────────
-    suspend fun analyzeMedicine(medicineText: String): String {
+    suspend fun analyzeMedicine(
+        medicineText: String
+    ): String {
+
         val prompt = """
-            You are a medical information assistant. Analyze this text scanned from a medicine label/strip:
-            
-            "$medicineText"
-            
-            Provide ONLY general educational information:
-            • Medicine name (if identifiable)
-            • Common uses
-            • General precautions
-            • Important: Always advise to consult a doctor
-            
-            ⚠ Note: This is for educational purposes only. Always consult a licensed healthcare professional.
+            Analyze this medicine text:
+
+            $medicineText
+
+            Provide:
+            • Name
+            • Uses
+            • Precautions
+            • Doctor consultation advice
         """.trimIndent()
 
-        return try {
-            val response = model.generateContent(content { text(prompt) })
-            response.text ?: "Could not analyze medicine information."
-        } catch (e: Exception) {
-            "⚠ Could not analyze. Scanned text:\n$medicineText\n\n⚠ Always consult a doctor before taking any medicine."
-        }
+        return askAI(prompt)
     }
 
-    // ── Waste Classification ──────────────────────────────────────────────────
-    suspend fun classifyWaste(detectedLabels: String): String {
+    suspend fun classifyWaste(
+        detectedLabels: String
+    ): String {
+
         val prompt = """
-            Based on these detected items: "$detectedLabels"
-            
-            Classify the waste type and provide disposal instructions:
-            
-            Categories:
-            • ♻ Recyclable (plastic, metal, glass, paper)
-            • 🌿 Organic (food waste, plant material)
-            • 🗑 Non-recyclable (mixed materials, contaminated items)
-            • ⚠ Hazardous (batteries, electronics, chemicals)
-            
-            Provide: Category, Why, How to dispose properly.
+            Classify this waste:
+
+            $detectedLabels
+
+            Give:
+            • Category
+            • Reason
+            • Disposal instructions
         """.trimIndent()
 
-        return try {
-            val response = model.generateContent(content { text(prompt) })
-            response.text ?: "Classification unavailable."
-        } catch (e: Exception) {
-            "⚠ Classification unavailable offline.\nDetected: $detectedLabels"
-        }
+        return askAI(prompt)
     }
 
-    // ── General Chat ──────────────────────────────────────────────────────────
-    suspend fun chat(userMessage: String): String {
-        val prompt = """
-            You are Smart Vision AI, an intelligent mobile assistant that helps users understand 
-            their surroundings through camera vision. Answer helpfully and concisely.
-            
-            User: $userMessage
-        """.trimIndent()
+    suspend fun chat(
+        userMessage: String
+    ): String {
 
-        return try {
-            val response = model.generateContent(content { text(prompt) })
-            response.text ?: "I couldn't generate a response."
-        } catch (e: Exception) {
-            "⚠ AI unavailable. Check internet connection."
-        }
+        return askAI(userMessage)
     }
 }

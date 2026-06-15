@@ -8,7 +8,7 @@ class HistoryModelTest {
     @Test
     fun historyEntityRoundTripKeepsFields() {
         val record = FakeDataFactory.historyRecord("Translation")
-        val entity = record.toEntity()
+        val entity = record.toEntity("test_user_123")
         val roundTrip = entity.toDomain()
         assertEquals(record.type, roundTrip.type)
         assertEquals(record.title, roundTrip.title)

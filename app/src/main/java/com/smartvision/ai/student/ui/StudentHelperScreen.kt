@@ -1,10 +1,16 @@
 package com.smartvision.ai.student.ui
 
 import android.Manifest
+import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.speech.RecognizerIntent
 import android.view.ViewGroup
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -14,15 +20,20 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.*
@@ -30,14 +41,16 @@ import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalDensity
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -46,189 +59,727 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.accompanist.permissions.*
 import com.smartvision.ai.compose.components.*
-import com.smartvision.ai.ocr.domain.RecognizedBlock
-import com.smartvision.ai.student.domain.*
+import com.smartvision.ai.domain.model.StudyHistoryItem
 import com.smartvision.ai.student.presentation.*
 import com.smartvision.ai.ui.theme.*
 import com.smartvision.ai.utils.ImageUtils
-import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicBoolean
 
-@OptIn(ExperimentalPermissionsApi::class)
+@OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun StudentHelperScreen(
     onBack: () -> Unit,
     viewModel: StudentHelperViewModel = hiltViewModel()
 ) {
     val cameraPermission = rememberPermissionState(Manifest.permission.CAMERA)
-    val scanState        by viewModel.scanState.collectAsStateWithLifecycle()
-    val subject          by viewModel.subject.collectAsStateWithLifecycle()
-    val overlayBlocks    by viewModel.overlayBlocks.collectAsStateWithLifecycle()
-    val chatMessages     by viewModel.chatMessages.collectAsStateWithLifecycle()
-    val isThinking       by viewModel.isThinking.collectAsStateWithLifecycle()
-    val flashEnabled     by viewModel.flashEnabled.collectAsStateWithLifecycle()
-    val activeTab        by viewModel.activeTab.collectAsStateWithLifecycle()
+    val questionText by viewModel.questionText.collectAsStateWithLifecycle()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val firestoreHistoryList by viewModel.firestoreHistoryList.collectAsStateWithLifecycle()
+    val isLastPage by viewModel.isLastPage.collectAsStateWithLifecycle()
+    val isLoadingHistory by viewModel.isLoadingHistory.collectAsStateWithLifecycle()
 
     val context = LocalContext.current
-    val galleryLauncher = rememberGalleryPickerLauncher { uri ->
-        val bmp = ImageUtils(com.google.firebase.storage.FirebaseStorage.getInstance()).loadBitmapFromUri(context, uri)
-        if (bmp != null) {
-            viewModel.solveCroppedQuestion(bmp)
+    val clipboardManager = LocalClipboardManager.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    // Toggle camera scanning overlay
+    var isCameraActive by remember { mutableStateOf(false) }
+
+    // TTS speaker state
+    var isSpeaking by remember { mutableStateOf(false) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel.stopSpeaking()
         }
     }
 
+    // Gallery Picker launcher
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.processUriForOcr(uri)
+        }
+    }
+
+    // Voice Input launcher
+    val speechRecognizerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val spokenText = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+            if (!spokenText.isNullOrBlank()) {
+                viewModel.updateQuestion(spokenText)
+                viewModel.generateAnswer(spokenText)
+            }
+        }
+    }
+
+    // CameraX tools
     val cameraRef = remember { mutableStateOf<Camera?>(null) }
     val imageCapture = remember { ImageCapture.Builder().build() }
 
-    LaunchedEffect(Unit) {
-        if (!cameraPermission.status.isGranted) cameraPermission.launchPermissionRequest()
-    }
-    LaunchedEffect(flashEnabled) {
-        cameraRef.value?.cameraControl?.enableTorch(flashEnabled)
-    }
+    Box(modifier = Modifier.fillMaxSize().background(DeepNavy)) {
+        if (isCameraActive) {
+            // Camera scanning interface
+            if (cameraPermission.status.isGranted) {
+                Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+                    StudentCameraPreview(
+                        modifier = Modifier.fillMaxSize(),
+                        imageCapture = imageCapture,
+                        onCameraReady = { cameraRef.value = it }
+                    )
 
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+                    var canvasWidth by remember { mutableStateOf(1) }
+                    var canvasHeight by remember { mutableStateOf(1) }
+                    val density = LocalDensity.current
 
-        // ── Camera Feed or Perm view ──────────────────────────────────────────
-        if (cameraPermission.status.isGranted) {
-            if (scanState is StudentScanState.CameraActive) {
-                StudentCameraPreview(
-                    modifier = Modifier.fillMaxSize(),
-                    imageCapture = imageCapture,
-                    onCameraReady = { cameraRef.value = it },
-                    onFrame = { img, rot, w, h -> viewModel.analyzeFrame(img, rot, w, h) }
+                    val defaultRect = remember(canvasWidth, canvasHeight) {
+                        if (canvasWidth > 1 && canvasHeight > 1) {
+                            val cropW = 280.dp.value * density.density
+                            val cropH = 180.dp.value * density.density
+                            val left = (canvasWidth - cropW) / 2f
+                            val top = (canvasHeight - cropH) / 2f
+                            Rect(left, top, left + cropW, top + cropH)
+                        } else {
+                            Rect(150f, 400f, 900f, 1100f)
+                        }
+                    }
+
+                    var manualRect by remember { mutableStateOf<Rect?>(null) }
+                    val cropRect = manualRect ?: defaultRect
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .onGloballyPositioned { coords ->
+                                canvasWidth = coords.size.width
+                                canvasHeight = coords.size.height
+                            }
+                    ) {
+                        ResizableViewfinder(
+                            rect = cropRect,
+                            onRectChange = { manualRect = it },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+
+                    // Scan Hint
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        ScanHintLabel(
+                            message = "🎓 Align question inside crop box",
+                            modifier = Modifier.align(Alignment.Center)
+                        )
+                    }
+
+                    // Top Bar for Scanner
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .statusBarsPadding()
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = { isCameraActive = false },
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(Color.Black.copy(0.5f))
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Cancel", tint = Color.White)
+                        }
+                        Text(
+                            "Scan Question",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                        Spacer(Modifier.width(40.dp))
+                    }
+
+                    // Bottom Capture Controls
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .align(Alignment.BottomCenter)
+                            .navigationBarsPadding()
+                            .padding(bottom = 32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(76.dp)
+                                .border(4.dp, Color.White, CircleShape)
+                                .padding(6.dp)
+                                .clip(CircleShape)
+                                .background(Color.White)
+                                .clickable {
+                                    captureAndCropPhoto(
+                                        context,
+                                        imageCapture,
+                                        cropRect,
+                                        canvasWidth,
+                                        canvasHeight
+                                    ) { croppedBmp ->
+                                        viewModel.processImageForOcr(croppedBmp)
+                                        isCameraActive = false
+                                    }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("📸", fontSize = 28.sp)
+                        }
+                    }
+                }
+            } else {
+                NoCameraPermView(
+                    onRequest = { cameraPermission.launchPermissionRequest() },
+                    modifier = Modifier.fillMaxSize()
                 )
             }
         } else {
-            NoCameraPermView(
-                onRequest = { cameraPermission.launchPermissionRequest() },
-                modifier = Modifier.fillMaxSize()
-            )
-        }
-
-        // ── Resizable Viewfinder Crop Box & Punched Overlay ───────────────────
-        var cropRect by remember { mutableStateOf(Rect(150f, 400f, 900f, 1100f)) }
-        var canvasWidth by remember { mutableStateOf(1) }
-        var canvasHeight by remember { mutableStateOf(1) }
-
-        if (scanState is StudentScanState.CameraActive && cameraPermission.status.isGranted) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .onGloballyPositioned { coords ->
-                        canvasWidth = coords.size.width
-                        canvasHeight = coords.size.height
-                    }
-            ) {
-                ResizableViewfinder(
-                    rect = cropRect,
-                    onRectChange = { cropRect = it },
-                    modifier = Modifier.fillMaxSize()
-                )
-
-                // Highlighted OCR Blocks inside Viewfinder
-                val normLeft = cropRect.left / canvasWidth
-                val normTop = cropRect.top / canvasHeight
-                val normRight = cropRect.right / canvasWidth
-                val normBottom = cropRect.bottom / canvasHeight
-
-                val insideBlocks = overlayBlocks.filter { block ->
-                    block.left >= normLeft && block.right <= normRight &&
-                    block.top >= normTop && block.bottom <= normBottom
-                }
-
-                ViewfinderTextHighlights(
-                    blocks = insideBlocks,
-                    onTapBlock = { block ->
-                        // Quick capture and crop block area directly if tapped!
-                        captureAndCropPhoto(context, imageCapture, cropRect, canvasWidth, canvasHeight) { croppedBmp ->
-                            viewModel.solveCroppedQuestion(croppedBmp, block.text)
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-        }
-
-        // ── Top HUD ────────────────────────────────────────────────────────────
-        if (scanState is StudentScanState.CameraActive) {
-            StudentTopHud(
-                flashEnabled = flashEnabled,
-                onBack = onBack,
-                onFlashToggle = { viewModel.toggleFlash() },
-                onGalleryPicker = { galleryLauncher() }
-            )
-        }
-
-        // ── Bottom Controls (Subject Chips + Capture Button) ───────────────────
-        if (scanState is StudentScanState.CameraActive && cameraPermission.status.isGranted) {
-            StudentBottomControls(
-                subject = subject,
-                onSubjectChange = { viewModel.setSubject(it) },
-                onCapture = {
-                    captureAndCropPhoto(context, imageCapture, cropRect, canvasWidth, canvasHeight) { croppedBmp ->
-                        viewModel.solveCroppedQuestion(croppedBmp)
-                    }
+            // Main Chat Study Assistant screen
+            Scaffold(
+                topBar = {
+                    TopAppBar(
+                        title = {
+                            Text(
+                                "AI Study Assistant",
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                fontSize = 19.sp
+                            )
+                        },
+                        navigationIcon = {
+                            IconButton(onClick = onBack) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Go back",
+                                    tint = Color.White
+                                )
+                            }
+                        },
+                        actions = {
+                            IconButton(onClick = {
+                                viewModel.clearAll()
+                                isSpeaking = false
+                            }) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Reset",
+                                    tint = NeonCyan
+                                )
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = DeepNavy
+                        )
+                    )
                 },
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-            )
-        }
+                containerColor = DeepNavy
+            ) { padding ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .verticalScroll(rememberScrollState())
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // Ask Question Card Form
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, GlassBorder, RoundedCornerShape(16.dp)),
+                        colors = CardDefaults.cardColors(containerColor = GlassCard),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            Text(
+                                "Ask Your Homework Question",
+                                color = NeonCyan,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
 
-        // ── Solving / Loading Screen Overlay ──────────────────────────────────
-        AnimatedVisibility(
-            visible = scanState is StudentScanState.Solving,
-            enter = fadeIn(), exit = fadeOut()
-        ) {
-            StudentSolvingOverlay()
-        }
+                            OutlinedTextField(
+                                value = questionText,
+                                onValueChange = { viewModel.updateQuestion(it) },
+                                modifier = Modifier.fillMaxWidth(),
+                                placeholder = { Text("Type, scan, paste, or speak your question...", color = Color.White.copy(0.35f), fontSize = 13.sp) },
+                                minLines = 3,
+                                maxLines = 5,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White,
+                                    focusedBorderColor = NeonCyan,
+                                    unfocusedBorderColor = Color.White.copy(0.2f)
+                                ),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                keyboardActions = KeyboardActions(onSearch = {
+                                    viewModel.generateAnswer()
+                                })
+                            )
 
-        // ── Solved Solution Sheet (Google Lens Homework Card Style) ──────────
-        AnimatedVisibility(
-            visible = scanState is StudentScanState.Solved,
-            enter = slideInVertically { it } + fadeIn(),
-            exit = slideOutVertically { it } + fadeOut(),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            val solvedState = scanState as? StudentScanState.Solved
-            if (solvedState != null) {
-                StudentSolutionSheet(
-                    solution = solvedState.solution,
-                    croppedBmp = solvedState.croppedImage,
-                    chatMessages = chatMessages,
-                    isThinking = isThinking,
-                    activeTab = activeTab,
-                    onTabSelect = { viewModel.setTab(it) },
-                    onSendTutorMsg = { viewModel.sendTutorChatMessage(it) },
-                    onExplainSimply = { viewModel.explainSolutionSimply() },
-                    onSpeak = { viewModel.speakSolution() },
-                    onRescan = { viewModel.resetScanner() }
-                )
-            }
-        }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // Scanning / voice input shortcuts
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    // Scan Question
+                                    IconButton(
+                                        onClick = {
+                                            if (cameraPermission.status.isGranted) {
+                                                isCameraActive = true
+                                            } else {
+                                                cameraPermission.launchPermissionRequest()
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Color.White.copy(0.05f))
+                                            .border(1.dp, Color.White.copy(0.15f), RoundedCornerShape(8.dp))
+                                    ) {
+                                        Text("📷", fontSize = 16.sp)
+                                    }
 
-        // ── Error Banner ──────────────────────────────────────────────────────
-        AnimatedVisibility(
-            visible = scanState is StudentScanState.Error,
-            enter = fadeIn(), exit = fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter).padding(20.dp)
-        ) {
-            val errState = scanState as? StudentScanState.Error
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(NeonPink.copy(0.15f))
-                    .border(1.dp, NeonPink.copy(0.4f), RoundedCornerShape(14.dp))
-                    .padding(14.dp)
-                    .clickable { viewModel.resetScanner() }
-            ) {
-                Text(
-                    "⚠️ ${errState?.message ?: "An error occurred."} Tap to rescan.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = NeonPink
-                )
+                                    // Upload Image
+                                    IconButton(
+                                        onClick = { galleryLauncher.launch("image/*") },
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Color.White.copy(0.05f))
+                                            .border(1.dp, Color.White.copy(0.15f), RoundedCornerShape(8.dp))
+                                    ) {
+                                        Text("🖼️", fontSize = 16.sp)
+                                    }
+
+                                    // Voice Question
+                                    IconButton(
+                                        onClick = {
+                                            try {
+                                                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                                                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                                                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, java.util.Locale.getDefault())
+                                                    putExtra(RecognizerIntent.EXTRA_PROMPT, "Ask your question...")
+                                                }
+                                                speechRecognizerLauncher.launch(intent)
+                                            } catch (e: Exception) {
+                                                Toast.makeText(context, "Speech recognition not supported on this device", Toast.LENGTH_SHORT).show()
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Color.White.copy(0.05f))
+                                            .border(1.dp, Color.White.copy(0.15f), RoundedCornerShape(8.dp))
+                                    ) {
+                                        Text("🎙️", fontSize = 16.sp)
+                                    }
+                                }
+
+                                // Send Button
+                                Button(
+                                    onClick = { viewModel.generateAnswer() },
+                                    shape = RoundedCornerShape(20.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                                    contentPadding = PaddingValues()
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .background(Brush.horizontalGradient(listOf(NeonCyan, NeonPurple)))
+                                            .padding(horizontal = 20.dp, vertical = 10.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("Send", color = Color.White, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // AI Response Area
+                    AnimatedVisibility(
+                        visible = uiState !is StudentUiState.Idle,
+                        enter = fadeIn() + expandVertically(),
+                        exit = fadeOut() + shrinkVertically()
+                    ) {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(1.dp, GlassBorder, RoundedCornerShape(16.dp)),
+                            colors = CardDefaults.cardColors(containerColor = NavyCard),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Box(modifier = Modifier.padding(16.dp)) {
+                                when (val state = uiState) {
+                                    is StudentUiState.Loading -> {
+                                        Column(
+                                            modifier = Modifier.fillMaxWidth().padding(24.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                                        ) {
+                                            CircularProgressIndicator(color = NeonCyan)
+                                            Text(
+                                                "Formulating detailed AI solution...",
+                                                color = Color.White.copy(0.7f),
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                        }
+                                    }
+                                    is StudentUiState.Success -> {
+                                        // Parse the response into Solution and Answer sections
+                                        val rawResponse = state.response
+                                        val solutionText: String
+                                        val answerText: String
+
+                                        // Parse SOLUTION: and ANSWER: blocks
+                                        val solutionRegex = Regex("SOLUTION:(?:\\s*\\n)?(.*?)(?=\\s*ANSWER:|$)", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
+                                        val answerRegex = Regex("ANSWER:(?:\\s*\\n)?(.*)", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
+
+                                        val solutionMatch = solutionRegex.find(rawResponse)
+                                        val answerMatch = answerRegex.find(rawResponse)
+
+                                        if (solutionMatch != null || answerMatch != null) {
+                                            solutionText = solutionMatch?.groupValues?.get(1)?.trim() ?: ""
+                                            answerText = answerMatch?.groupValues?.get(1)?.trim() ?: ""
+                                        } else {
+                                            // Fallback: show entire response as solution
+                                            solutionText = rawResponse.trim()
+                                            answerText = ""
+                                        }
+
+                                        Column(
+                                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                                        ) {
+                                            // Action buttons row
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.End,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                // Read Aloud
+                                                IconButton(onClick = {
+                                                    if (isSpeaking) {
+                                                        viewModel.stopSpeaking()
+                                                        isSpeaking = false
+                                                    } else {
+                                                        viewModel.speak(state.response)
+                                                        isSpeaking = true
+                                                    }
+                                                }, modifier = Modifier.size(32.dp)) {
+                                                    Icon(
+                                                        imageVector = if (isSpeaking) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
+                                                        contentDescription = "Read aloud",
+                                                        tint = if (isSpeaking) NeonCyan else Color.White.copy(0.6f),
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                                // Copy
+                                                IconButton(onClick = {
+                                                    clipboardManager.setText(AnnotatedString(state.response))
+                                                    Toast.makeText(context, "Copied to Clipboard", Toast.LENGTH_SHORT).show()
+                                                }, modifier = Modifier.size(32.dp)) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.ContentCopy,
+                                                        contentDescription = "Copy text",
+                                                        tint = Color.White.copy(0.6f),
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                                // Share
+                                                IconButton(onClick = {
+                                                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                                        type = "text/plain"
+                                                        putExtra(Intent.EXTRA_TEXT, state.response)
+                                                    }
+                                                    context.startActivity(Intent.createChooser(shareIntent, "Share solution"))
+                                                }, modifier = Modifier.size(32.dp)) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Share,
+                                                        contentDescription = "Share text",
+                                                        tint = Color.White.copy(0.6f),
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                            }
+
+                                            // Solution Section
+                                            if (solutionText.isNotBlank()) {
+                                                Text(
+                                                    "Solution:",
+                                                    color = NeonCyan,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 16.sp
+                                                )
+
+                                                // Parse and display each line of the solution
+                                                val solutionLines = solutionText.lines()
+                                                    .map { it.trim() }
+                                                    .filter { it.isNotBlank() }
+
+                                                Column(
+                                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                                ) {
+                                                    solutionLines.forEach { line ->
+                                                        // Clean up markdown artifacts like ** and ##
+                                                        val cleanLine = line
+                                                            .replace(Regex("\\*\\*(.*?)\\*\\*"), "$1")
+                                                            .replace(Regex("^#+\\s*"), "")
+                                                            .trim()
+
+                                                        if (cleanLine.isNotBlank()) {
+                                                            Text(
+                                                                text = cleanLine,
+                                                                color = Color.White.copy(0.88f),
+                                                                fontSize = 14.sp,
+                                                                lineHeight = 21.sp,
+                                                                fontFamily = FontFamily.SansSerif
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            // Answer Section
+                                            if (answerText.isNotBlank()) {
+                                                Spacer(modifier = Modifier.height(4.dp))
+
+                                                Text(
+                                                    "Answer:",
+                                                    color = NeonPink,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 16.sp
+                                                )
+
+                                                // Clean the answer text
+                                                val cleanAnswer = answerText
+                                                    .replace(Regex("\\*\\*(.*?)\\*\\*"), "$1")
+                                                    .replace(Regex("^#+\\s*"), "")
+                                                    .trim()
+
+                                                Text(
+                                                    text = cleanAnswer,
+                                                    color = NeonCyan,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 28.sp,
+                                                    lineHeight = 34.sp,
+                                                    fontFamily = FontFamily.SansSerif
+                                                )
+                                            }
+
+                                            // Fallback: if no structured sections were found, show raw
+                                            if (solutionText.isBlank() && answerText.isBlank()) {
+                                                Text(
+                                                    text = rawResponse,
+                                                    color = Color.White.copy(0.9f),
+                                                    fontSize = 14.sp,
+                                                    lineHeight = 22.sp,
+                                                    fontFamily = FontFamily.SansSerif
+                                                )
+                                            }
+                                        }
+                                    }
+                                    is StudentUiState.Error -> {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(NeonPink.copy(0.15f))
+                                                .border(1.dp, NeonPink.copy(0.3f), RoundedCornerShape(8.dp))
+                                                .padding(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Text("⚠️", fontSize = 18.sp)
+                                            Text(
+                                                text = state.message,
+                                                color = NeonPink,
+                                                fontWeight = FontWeight.Medium,
+                                                fontSize = 14.sp
+                                            )
+                                        }
+                                    }
+                                    else -> {}
+                                }
+                            }
+                        }
+                    }
+
+                    // History logs
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Study History",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold
+                            )
+                            if (firestoreHistoryList.isNotEmpty()) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        "Export",
+                                        color = NeonCyan,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier
+                                            .clickable {
+                                                viewModel.exportHistory { res ->
+                                                    res.onSuccess { uri ->
+                                                        android.widget.Toast.makeText(context, "Exported successfully to Downloads/Documents", android.widget.Toast.LENGTH_LONG).show()
+                                                    }.onFailure { ex ->
+                                                        android.widget.Toast.makeText(context, "Export failed: ${ex.message}", android.widget.Toast.LENGTH_SHORT).show()
+                                                    }
+                                                }
+                                            }
+                                            .padding(4.dp)
+                                    )
+                                    Text(
+                                        "|",
+                                        color = Color.White.copy(0.2f),
+                                        fontSize = 12.sp
+                                    )
+                                    Text(
+                                        "Clear All",
+                                        color = NeonPink,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier
+                                            .clickable { viewModel.clearAllHistory() }
+                                            .padding(4.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        if (firestoreHistoryList.isEmpty()) {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().padding(24.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    "No recent study history.",
+                                    color = Color.White.copy(0.4f),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        } else {
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                firestoreHistoryList.forEach { historyItem ->
+                                    Card(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                viewModel.reopenHistoryItem(historyItem)
+                                                isSpeaking = false
+                                            }
+                                            .border(1.dp, Color.White.copy(0.08f), RoundedCornerShape(12.dp)),
+                                        colors = CardDefaults.cardColors(containerColor = Color.White.copy(0.03f)),
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Column(
+                                                modifier = Modifier.weight(1f),
+                                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .background(Color.White.copy(0.1f), RoundedCornerShape(4.dp))
+                                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = historyItem.subject.uppercase(),
+                                                            color = NeonCyan,
+                                                            fontSize = 8.sp,
+                                                            fontWeight = FontWeight.Bold
+                                                        )
+                                                    }
+                                                    Text(
+                                                        text = historyItem.question,
+                                                        color = Color.White,
+                                                        fontWeight = FontWeight.Medium,
+                                                        fontSize = 14.sp,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                        modifier = Modifier.weight(1f)
+                                                    )
+                                                }
+                                                Text(
+                                                    text = java.text.SimpleDateFormat("dd MMM yyyy, hh:mm a", java.util.Locale.getDefault()).format(
+                                                        java.util.Date(historyItem.timestamp)
+                                                    ),
+                                                    color = Color.White.copy(0.4f),
+                                                    fontSize = 11.sp
+                                                )
+                                            }
+
+                                            IconButton(onClick = { viewModel.deleteHistoryItem(historyItem.id) }) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Delete,
+                                                    contentDescription = "Delete record",
+                                                    tint = Color.White.copy(0.35f)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if (!isLastPage) {
+                                    Card(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { viewModel.loadNextPage() }
+                                            .border(1.dp, Color.White.copy(0.08f), RoundedCornerShape(12.dp)),
+                                        colors = CardDefaults.cardColors(containerColor = Color.White.copy(0.05f)),
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = if (isLoadingHistory) "Loading..." else "Load More",
+                                                color = NeonCyan,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -237,18 +788,27 @@ fun StudentHelperScreen(
 // ══════════════════════════════════════════════════════════════════════════════
 // CAMERA PREVIEW COMPOSABLE
 // ══════════════════════════════════════════════════════════════════════════════
-
 @Composable
 private fun StudentCameraPreview(
     modifier: Modifier,
     imageCapture: ImageCapture,
-    onCameraReady: (Camera) -> Unit,
-    onFrame: (android.media.Image, Int, Int, Int) -> Unit
+    onCameraReady: (Camera) -> Unit
 ) {
     val ctx = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val executor = remember { Executors.newSingleThreadExecutor() }
-    val processing = remember { AtomicBoolean(false) }
+
+    DisposableEffect(lifecycleOwner) {
+        onDispose {
+            val future = ProcessCameraProvider.getInstance(ctx)
+            future.addListener({
+                try {
+                    future.get().unbindAll()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }, ContextCompat.getMainExecutor(ctx))
+        }
+    }
 
     AndroidView(
         modifier = modifier,
@@ -267,24 +827,10 @@ private fun StudentCameraPreview(
                 val previewUC = Preview.Builder().build()
                     .also { it.setSurfaceProvider(preview.surfaceProvider) }
 
-                val analysisUC = ImageAnalysis.Builder()
-                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                    .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
-                    .build()
-
-                analysisUC.setAnalyzer(executor) { proxy ->
-                    val img = proxy.image
-                    if (img != null && processing.compareAndSet(false, true)) {
-                        onFrame(img, proxy.imageInfo.rotationDegrees, img.width, img.height)
-                        processing.set(false)
-                    }
-                    proxy.close()
-                }
-
                 val cam = provider.bindToLifecycle(
                     lifecycleOwner,
                     CameraSelector.DEFAULT_BACK_CAMERA,
-                    previewUC, analysisUC, imageCapture
+                    previewUC, imageCapture
                 )
                 onCameraReady(cam)
             }, ContextCompat.getMainExecutor(context))
@@ -296,13 +842,13 @@ private fun StudentCameraPreview(
 // ══════════════════════════════════════════════════════════════════════════════
 // RESIZABLE VIEWFINDER OVERLAY
 // ══════════════════════════════════════════════════════════════════════════════
-
 @Composable
 private fun ResizableViewfinder(
     rect: Rect,
     onRectChange: (Rect) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val density = LocalDensity.current
     val handleSize = 44.dp
     val thick = 4.dp
     val rad = 12.dp
@@ -311,7 +857,6 @@ private fun ResizableViewfinder(
         val widthPx = constraints.maxWidth.toFloat()
         val heightPx = constraints.maxHeight.toFloat()
 
-        // Track whether the current touch began inside the crop box for translation drag
         var isDraggingBox by remember { mutableStateOf(false) }
 
         val dragTranslationModifier = Modifier.pointerInput(rect) {
@@ -329,7 +874,6 @@ private fun ResizableViewfinder(
                         var newLeft = rect.left + dragAmount.x
                         var newTop = rect.top + dragAmount.y
 
-                        // Enforce boundaries
                         if (newLeft < 20f) newLeft = 20f
                         if (newTop < 120f) newTop = 120f
 
@@ -346,17 +890,12 @@ private fun ResizableViewfinder(
                         onRectChange(Rect(newLeft, newTop, newLeft + rectWidth, newTop + rectHeight))
                     }
                 },
-                onDragEnd = {
-                    isDraggingBox = false
-                },
-                onDragCancel = {
-                    isDraggingBox = false
-                }
+                onDragEnd = { isDraggingBox = false },
+                onDragCancel = { isDraggingBox = false }
             )
         }
 
         Canvas(modifier = Modifier.fillMaxSize().then(dragTranslationModifier)) {
-            // Dark transparent mask covering everything except the crop area
             val outerPath = Path().apply {
                 addRect(Rect(0f, 0f, size.width, size.height))
             }
@@ -371,7 +910,6 @@ private fun ResizableViewfinder(
             val punchedPath = Path.combine(PathOperation.Difference, outerPath, innerPath)
             drawPath(punchedPath, Color.Black.copy(alpha = 0.70f))
 
-            // Slim glowing dashed border representing the selection boundary
             drawRoundRect(
                 color = NeonCyan.copy(alpha = 0.45f),
                 topLeft = rect.topLeft,
@@ -383,12 +921,11 @@ private fun ResizableViewfinder(
                 )
             )
 
-            // Draw thick solid cyan brackets at corners matching Google Lens exactly
             val len = 24.dp.toPx()
             val thickPx = thick.toPx()
             val radPx = rad.toPx()
 
-            // Top-Left corner bracket
+            // TL
             val tlPath = Path().apply {
                 moveTo(rect.left, rect.top + len)
                 lineTo(rect.left, rect.top + radPx)
@@ -397,7 +934,7 @@ private fun ResizableViewfinder(
             }
             drawPath(tlPath, NeonCyan, style = Stroke(width = thickPx, cap = StrokeCap.Round))
 
-            // Top-Right corner bracket
+            // TR
             val trPath = Path().apply {
                 moveTo(rect.right - len, rect.top)
                 lineTo(rect.right - radPx, rect.top)
@@ -406,7 +943,7 @@ private fun ResizableViewfinder(
             }
             drawPath(trPath, NeonCyan, style = Stroke(width = thickPx, cap = StrokeCap.Round))
 
-            // Bottom-Left corner bracket
+            // BL
             val blPath = Path().apply {
                 moveTo(rect.left, rect.bottom - len)
                 lineTo(rect.left, rect.bottom - radPx)
@@ -415,7 +952,7 @@ private fun ResizableViewfinder(
             }
             drawPath(blPath, NeonCyan, style = Stroke(width = thickPx, cap = StrokeCap.Round))
 
-            // Bottom-Right corner bracket
+            // BR
             val brPath = Path().apply {
                 moveTo(rect.right - len, rect.bottom)
                 lineTo(rect.right - radPx, rect.bottom)
@@ -425,14 +962,13 @@ private fun ResizableViewfinder(
             drawPath(brPath, NeonCyan, style = Stroke(width = thickPx, cap = StrokeCap.Round))
         }
 
-        // Draggable corner handles positioned precisely (invisible handles overlaying on corners)
+        val handleSizePx = with(density) { handleSize.toPx() }
+
+        // Draggable corners
         // Top-Left
         Box(
             modifier = Modifier
-                .offset(
-                    x = (rect.left - handleSize.value / 2).dp,
-                    y = (rect.top - handleSize.value / 2).dp
-                )
+                .offset { IntOffset((rect.left - handleSizePx / 2).toInt(), (rect.top - handleSizePx / 2).toInt()) }
                 .size(handleSize)
                 .pointerInput(rect) {
                     detectDragGestures { change, dragAmount ->
@@ -447,10 +983,7 @@ private fun ResizableViewfinder(
         // Top-Right
         Box(
             modifier = Modifier
-                .offset(
-                    x = (rect.right - handleSize.value / 2).dp,
-                    y = (rect.top - handleSize.value / 2).dp
-                )
+                .offset { IntOffset((rect.right - handleSizePx / 2).toInt(), (rect.top - handleSizePx / 2).toInt()) }
                 .size(handleSize)
                 .pointerInput(rect) {
                     detectDragGestures { change, dragAmount ->
@@ -465,10 +998,7 @@ private fun ResizableViewfinder(
         // Bottom-Left
         Box(
             modifier = Modifier
-                .offset(
-                    x = (rect.left - handleSize.value / 2).dp,
-                    y = (rect.bottom - handleSize.value / 2).dp
-                )
+                .offset { IntOffset((rect.left - handleSizePx / 2).toInt(), (rect.bottom - handleSizePx / 2).toInt()) }
                 .size(handleSize)
                 .pointerInput(rect) {
                     detectDragGestures { change, dragAmount ->
@@ -483,10 +1013,7 @@ private fun ResizableViewfinder(
         // Bottom-Right
         Box(
             modifier = Modifier
-                .offset(
-                    x = (rect.right - handleSize.value / 2).dp,
-                    y = (rect.bottom - handleSize.value / 2).dp
-                )
+                .offset { IntOffset((rect.right - handleSizePx / 2).toInt(), (rect.bottom - handleSizePx / 2).toInt()) }
                 .size(handleSize)
                 .pointerInput(rect) {
                     detectDragGestures { change, dragAmount ->
@@ -501,527 +1028,8 @@ private fun ResizableViewfinder(
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// OCR TEXT HIGHLIGHTS OVERLAY
-// ══════════════════════════════════════════════════════════════════════════════
-
-@Composable
-private fun ViewfinderTextHighlights(
-    blocks: List<RecognizedBlock>,
-    onTapBlock: (RecognizedBlock) -> Unit,
-    modifier: Modifier
-) {
-    Canvas(modifier = modifier) {
-        blocks.forEach { block ->
-            val left   = block.left   * size.width
-            val top    = block.top    * size.height
-            val right  = block.right  * size.width
-            val bottom = block.bottom * size.height
-
-            // Small subtle glowing highlight box over detected lines
-            drawRect(
-                color = NeonCyan.copy(alpha = 0.15f),
-                topLeft = Offset(left, top),
-                size = Size(right - left, bottom - top)
-            )
-            drawRect(
-                color = NeonCyan.copy(alpha = 0.50f),
-                topLeft = Offset(left, top),
-                size = Size(right - left, bottom - top),
-                style = Stroke(width = 1f)
-            )
-        }
-    }
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// TOP HUD
-// ══════════════════════════════════════════════════════════════════════════════
-
-@Composable
-private fun StudentTopHud(
-    flashEnabled: Boolean,
-    onBack: () -> Unit,
-    onFlashToggle: () -> Unit,
-    onGalleryPicker: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .statusBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(Color.Black.copy(alpha = 0.45f))
-                .border(1.dp, Color.White.copy(alpha = 0.15f), CircleShape)
-                .clickable(onClick = onBack),
-            contentAlignment = Alignment.Center
-        ) { Text("←", color = Color.White, fontSize = 18.sp) }
-
-        Text(
-            "Homework Solver",
-            color = Color.White,
-            fontWeight = FontWeight.Bold,
-            style = MaterialTheme.typography.titleMedium
-        )
-
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(Color.Black.copy(0.45f))
-                    .border(1.dp, Color.White.copy(0.15f), CircleShape)
-                    .clickable(onClick = onFlashToggle),
-                contentAlignment = Alignment.Center
-            ) { Text(if (flashEnabled) "⚡" else "🔦", color = Color.White, fontSize = 16.sp) }
-
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(Color.Black.copy(0.45f))
-                    .border(1.dp, Color.White.copy(0.15f), CircleShape)
-                    .clickable(onClick = onGalleryPicker),
-                contentAlignment = Alignment.Center
-            ) { Text("🖼️", color = Color.White, fontSize = 16.sp) }
-        }
-    }
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// BOTTOM CONTROLS (Subject Chips + Capture Button)
-// ══════════════════════════════════════════════════════════════════════════════
-
-@Composable
-private fun StudentBottomControls(
-    subject: Subject,
-    onSubjectChange: (Subject) -> Unit,
-    onCapture: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(bottom = 32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        // Horizontal subject chips at the bottom
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            items(Subject.values()) { subj ->
-                val isSelected = subj == subject
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(
-                            if (isSelected) Brush.horizontalGradient(listOf(NeonCyan.copy(0.25f), NeonBlue.copy(0.25f)))
-                            else Brush.horizontalGradient(listOf(Color.Black.copy(0.5f), Color.Black.copy(0.5f)))
-                        )
-                        .border(
-                            1.5.dp,
-                            if (isSelected) NeonCyan else Color.White.copy(alpha = 0.2f),
-                            RoundedCornerShape(20.dp)
-                        )
-                        .clickable { onSubjectChange(subj) }
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                ) {
-                    Text(
-                        text = "${subj.emoji} ${subj.displayName}",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = Color.White,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                    )
-                }
-            }
-        }
-
-        // Authentic Google Lens double-circle capture button
-        Box(
-            modifier = Modifier
-                .size(76.dp)
-                .border(4.dp, Color.White, CircleShape)
-                .padding(6.dp)
-                .clip(CircleShape)
-                .background(Color.White)
-                .clickable(onClick = onCapture),
-            contentAlignment = Alignment.Center
-        ) {
-            Text("🎓", fontSize = 28.sp)
-        }
-    }
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// SOLVING OVERLAY
-// ══════════════════════════════════════════════════════════════════════════════
-
-@Composable
-private fun StudentSolvingOverlay() {
-    val inf = rememberInfiniteTransition(label = "solving")
-    val rot by inf.animateFloat(0f, 360f, infiniteRepeatable(tween(1600, easing = LinearEasing)), label = "r")
-    val pulse by inf.animateFloat(0.4f, 1f, infiniteRepeatable(tween(850), RepeatMode.Reverse), label = "p")
-
-    Box(
-        modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.85f)),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Box(Modifier.size(80.dp).graphicsLayer(rotationZ = rot)) {
-                Canvas(Modifier.fillMaxSize()) {
-                    drawArc(
-                        Brush.sweepGradient(listOf(Color.Transparent, NeonCyan)),
-                        0f, 270f, false,
-                        style = Stroke(4.dp.toPx(), cap = StrokeCap.Round)
-                    )
-                }
-            }
-            Text("AI Solving Homework...", style = MaterialTheme.typography.bodyLarge, color = NeonCyan.copy(alpha = pulse), fontWeight = FontWeight.SemiBold)
-            Text("Formulating step-by-step solution • Gemini", style = MaterialTheme.typography.labelSmall, color = Color.White.copy(0.6f))
-        }
-    }
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// SOLUTION BOTTOM SHEET (Google Lens Homework panel)
-// ══════════════════════════════════════════════════════════════════════════════
-
-@Composable
-private fun StudentSolutionSheet(
-    solution: AiSolution,
-    croppedBmp: Bitmap?,
-    chatMessages: List<ChatMessage>,
-    isThinking: Boolean,
-    activeTab: StudentTab,
-    onTabSelect: (StudentTab) -> Unit,
-    onSendTutorMsg: (String) -> Unit,
-    onExplainSimply: () -> Unit,
-    onSpeak: () -> Unit,
-    onRescan: () -> Unit
-) {
-    val ext = MaterialTheme.extended
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .statusBarsPadding()
-            .background(DeepNavy)
-    ) {
-        // Top Card Header with cropped Bitmap
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(130.dp)
-                .background(Color.Black)
-        ) {
-            if (croppedBmp != null) {
-                Image(
-                    bitmap = croppedBmp.asImageBitmap(),
-                    contentDescription = "Scanned question",
-                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp))
-                )
-            }
-
-            // Top dismiss / Rescan row
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color.Black.copy(0.6f))
-                        .clickable(onClick = onRescan)
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                ) { Text("← Scan Another", style = MaterialTheme.typography.labelSmall, color = Color.White, fontWeight = FontWeight.SemiBold) }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Box(
-                        modifier = Modifier.size(34.dp).clip(CircleShape).background(Color.Black.copy(0.6f)).clickable(onClick = onSpeak),
-                        contentAlignment = Alignment.Center
-                    ) { Text("🔊", fontSize = 14.sp) }
-                }
-            }
-        }
-
-        // Sliding tabs
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(ext.glassCard)
-                .border(1.dp, ext.glassBorder, RoundedCornerShape(12.dp))
-                .padding(4.dp)
-        ) {
-            StudentTab.values().forEach { tab ->
-                val active = tab == activeTab
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (active) NeonCyan.copy(0.2f) else Color.Transparent)
-                        .clickable { onTabSelect(tab) }
-                        .padding(vertical = 8.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        "${tab.emoji} ${tab.label}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (active) NeonCyan else MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal
-                    )
-                }
-            }
-        }
-
-        // Dynamic Tab Content
-        Box(modifier = Modifier.weight(1f)) {
-            when (activeTab) {
-                StudentTab.SOLUTION -> {
-                    Column(
-                        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        // Main Answer Card
-                        SolutionCard(title = "Final Solution", icon = "✅", color = NeonGreen) {
-                            Text(solution.mainAnswer, style = MaterialTheme.typography.bodyMedium, color = Color.White, lineHeight = 22.sp)
-                        }
-
-                        // Steps Card
-                        if (solution.steps.isNotEmpty()) {
-                            SolutionCard(title = "Step-by-Step Explanation", icon = "📍", color = NeonCyan) {
-                                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    solution.steps.forEachIndexed { idx, step ->
-                                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                            Box(
-                                                modifier = Modifier.size(22.dp).clip(CircleShape).background(NeonCyan.copy(0.12f)),
-                                                contentAlignment = Alignment.Center
-                                            ) { Text("${idx + 1}", style = MaterialTheme.typography.labelSmall, color = NeonCyan, fontWeight = FontWeight.Bold) }
-                                            Text(step, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f), modifier = Modifier.weight(1f), lineHeight = 18.sp)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Key Formula Card
-                        solution.keyFormula?.let { formula ->
-                            SolutionCard(title = "Key Formula Summary", icon = "📐", color = NeonPurple) {
-                                Box(
-                                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(NeonPurple.copy(0.08f)).border(1.dp, NeonPurple.copy(0.25f), RoundedCornerShape(8.dp)).padding(12.dp)
-                                ) {
-                                    Text(formula, style = MaterialTheme.typography.bodyLarge, color = NeonPurple, fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace)
-                                }
-                            }
-                        }
-
-                        // Quick Tip Card
-                        solution.quickTip?.let { tip ->
-                            SolutionCard(title = "Tutor's Eco Tip", icon = "🌱", color = NeonOrange) {
-                                Text(tip, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f), lineHeight = 18.sp)
-                            }
-                        }
-
-                        // Explain Simply CTA
-                        NeonButton(
-                            text = "🧒 Explain Solutions Simply",
-                            onClick = onExplainSimply,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-
-                        Spacer(Modifier.height(16.dp))
-                    }
-                }
-
-                StudentTab.CHAT -> {
-                    Column(modifier = Modifier.fillMaxSize()) {
-                        LazyColumn(
-                            modifier = Modifier.weight(1f).padding(horizontal = 14.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                            contentPadding = PaddingValues(bottom = 16.dp)
-                        ) {
-                            items(chatMessages) { msg ->
-                                TutorChatBubble(msg)
-                            }
-                        }
-                        TutorChatInputBar(isThinking = isThinking, onSend = onSendTutorMsg)
-                    }
-                }
-
-                StudentTab.PRACTICE -> {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        contentPadding = PaddingValues(bottom = 16.dp)
-                    ) {
-                        items(solution.practiceQ) { q ->
-                            PracticeQuestionCard(q, onSolve = { onSendTutorMsg(it) })
-                        }
-                    }
-                }
-
-                else -> {}
-            }
-        }
-    }
-}
-
-@Composable
-private fun SolutionCard(title: String, icon: String, color: Color, content: @Composable () -> Unit) {
-    val ext = MaterialTheme.extended
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(ext.glassCard)
-            .border(1.dp, color.copy(0.2f), RoundedCornerShape(16.dp))
-            .padding(14.dp)
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(icon, fontSize = 14.sp)
-                Text(title, style = MaterialTheme.typography.labelMedium, color = color, fontWeight = FontWeight.Bold)
-            }
-            HorizontalDivider(color = color.copy(0.12f))
-            content()
-        }
-    }
-}
-
-@Composable
-private fun TutorChatBubble(msg: ChatMessage) {
-    val ext = MaterialTheme.extended
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (msg.isUser) Arrangement.End else Arrangement.Start
-    ) {
-        if (!msg.isUser) {
-            Box(
-                modifier = Modifier.size(30.dp).clip(CircleShape).background(Brush.radialGradient(listOf(NeonCyan, NeonBlue))),
-                contentAlignment = Alignment.Center
-            ) { Text("🤖", fontSize = 14.sp) }
-            Spacer(Modifier.width(8.dp))
-        }
-        Box(
-            modifier = Modifier
-                .widthIn(max = 280.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(if (msg.isUser) NeonCyan.copy(0.25f) else ext.glassCard)
-                .border(1.dp, if (msg.isUser) NeonCyan.copy(0.4f) else ext.glassBorder, RoundedCornerShape(14.dp))
-                .padding(12.dp)
-        ) {
-            if (msg.isLoading) {
-                ThinkingDots()
-            } else {
-                Text(msg.text, style = MaterialTheme.typography.bodySmall, color = Color.White, lineHeight = 18.sp)
-            }
-        }
-    }
-}
-
-@Composable
-private fun TutorChatInputBar(isThinking: Boolean, onSend: (String) -> Unit) {
-    var txt by remember { mutableStateOf("") }
-    val keyboard = LocalSoftwareKeyboardController.current
-
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(12.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        OutlinedTextField(
-            value = txt,
-            onValueChange = { txt = it },
-            placeholder = { Text("Ask follow-up question...", fontSize = 13.sp, color = Color.White.copy(0.4f)) },
-            modifier = Modifier.weight(1f),
-            maxLines = 2,
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = NeonCyan,
-                unfocusedBorderColor = Color.White.copy(0.15f),
-                cursorColor = NeonCyan
-            ),
-            shape = RoundedCornerShape(20.dp),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-            keyboardActions = KeyboardActions(onSend = {
-                if (txt.isNotBlank() && !isThinking) {
-                    onSend(txt)
-                    txt = ""
-                    keyboard?.hide()
-                }
-            })
-        )
-        Box(
-            modifier = Modifier
-                .size(44.dp)
-                .clip(CircleShape)
-                .background(if (txt.isNotBlank() && !isThinking) NeonCyan else Color.White.copy(0.1f))
-                .clickable {
-                    if (txt.isNotBlank() && !isThinking) {
-                        onSend(txt)
-                        txt = ""
-                        keyboard?.hide()
-                    }
-                },
-            contentAlignment = Alignment.Center
-        ) { Text("↑", color = Color.White, fontWeight = FontWeight.Bold) }
-    }
-}
-
-@Composable
-private fun PracticeQuestionCard(question: String, onSolve: (String) -> Unit) {
-    val ext = MaterialTheme.extended
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(ext.glassCard)
-            .border(1.dp, NeonCyan.copy(0.2f), RoundedCornerShape(14.dp))
-            .padding(14.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text("🏋️", fontSize = 18.sp)
-        Text(question, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f), modifier = Modifier.weight(1f), lineHeight = 18.sp)
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .background(NeonCyan.copy(0.15f))
-                .clickable { onSolve("Solve this: $question") }
-                .padding(horizontal = 10.dp, vertical = 6.dp)
-        ) { Text("Solve", style = MaterialTheme.typography.labelSmall, color = NeonCyan) }
-    }
-}
-
-@Composable
-private fun ThinkingDots() {
-    val inf = rememberInfiniteTransition(label = "chatdots")
-    val d1 by inf.animateFloat(0.3f, 1f, infiniteRepeatable(tween(500), RepeatMode.Reverse), label = "d1")
-    val d2 by inf.animateFloat(0.3f, 1f, infiniteRepeatable(tween(500, 150), RepeatMode.Reverse), label = "d2")
-    val d3 by inf.animateFloat(0.3f, 1f, infiniteRepeatable(tween(500, 300), RepeatMode.Reverse), label = "d3")
-    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        listOf(d1, d2, d3).forEach { a ->
-            Box(Modifier.size(6.dp).clip(CircleShape).background(NeonCyan.copy(a)))
-        }
-    }
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
 // CAPTURE & CROP HELPER METHODS
 // ══════════════════════════════════════════════════════════════════════════════
-
 private fun captureAndCropPhoto(
     context: Context,
     imageCapture: ImageCapture,
@@ -1051,7 +1059,7 @@ private fun captureAndCropPhoto(
             }
 
             override fun onError(exception: ImageCaptureException) {
-                // Ignore capture errors
+                Toast.makeText(context, "Failed to capture image", Toast.LENGTH_SHORT).show()
             }
         }
     )
@@ -1078,8 +1086,36 @@ private fun NoCameraPermView(onRequest: () -> Unit, modifier: Modifier) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text("📷", fontSize = 64.sp)
             Text("Camera permission required", color = Color.White, style = MaterialTheme.typography.titleMedium)
-            Text("Required for Google Lens Homework solver", color = Color.White.copy(0.6f), style = MaterialTheme.typography.bodySmall)
-            NeonButton("Grant Permission", onClick = onRequest, modifier = Modifier.padding(horizontal = 32.dp))
+            Text("Required to scan textbook or assignment questions.", color = Color.White.copy(0.6f), style = MaterialTheme.typography.bodySmall)
+            Button(onClick = onRequest) {
+                Text("Grant Permission")
+            }
         }
+    }
+}
+
+@Composable
+private fun ScanHintLabel(message: String, modifier: Modifier) {
+    val infiniteTransition = rememberInfiniteTransition(label = "hint")
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0.4f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1400), RepeatMode.Reverse),
+        label = "hintAlpha"
+    )
+
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color.Black.copy(alpha = 0.65f))
+            .border(1.dp, NeonCyan.copy(alpha = 0.3f), RoundedCornerShape(20.dp))
+            .padding(horizontal = 20.dp, vertical = 10.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            message,
+            color = Color.White.copy(alpha = alpha),
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium
+        )
     }
 }

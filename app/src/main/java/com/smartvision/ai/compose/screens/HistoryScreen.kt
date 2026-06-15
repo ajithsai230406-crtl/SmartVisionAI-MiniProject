@@ -11,6 +11,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
+import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.smartvision.ai.compose.components.*
@@ -27,10 +28,24 @@ fun HistoryScreen(
     val ext     = MaterialTheme.extended
     val items   by viewModel.history.collectAsStateWithLifecycle()
     var filter  by remember { mutableStateOf("All") }
-    val filters = listOf("All", "OCR", "Chat", "Waste", "Medicine")
+    val filters = listOf("All", "OCR", "Translation", "Chat", "Waste", "Medicine", "QR Scan", "Document", "Object")
     val fmt     = SimpleDateFormat("dd MMM, HH:mm", Locale.getDefault())
+    val ctx     = LocalContext.current
 
-    val filtered = if (filter == "All") items else items.filter { it.type == filter }
+    val filtered = items.filter { item ->
+        when (filter) {
+            "All" -> true
+            "OCR" -> item.type == "OCR"
+            "Translation" -> item.type == "Translation" || item.type == "Voice"
+            "Chat" -> item.type == "ChatUser" || item.type == "ChatBot"
+            "Waste" -> item.type == "Waste"
+            "Medicine" -> item.type == "Medicine"
+            "QR Scan" -> item.type == "QR Scan" || item.type == "QR"
+            "Document" -> item.type == "Document"
+            "Object" -> item.type == "Object"
+            else -> false
+        }
+    }
 
     GradientBackground {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -38,6 +53,46 @@ fun HistoryScreen(
                 title  = "History",
                 onBack = onBack,
                 actions = {
+                    if (filtered.isNotEmpty()) {
+                        Text(
+                            "Download Report 📥",
+                            color = NeonBlue,
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier
+                                .clickable {
+                                    val reportBuilder = StringBuilder()
+                                    reportBuilder.append("========================================\n")
+                                    reportBuilder.append("        SMART VISION AI HISTORY REPORT  \n")
+                                    reportBuilder.append("        Generated: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())}\n")
+                                    reportBuilder.append("========================================\n\n")
+                                    filtered.forEachIndexed { index, record ->
+                                        val dateStr = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(record.createdAt))
+                                        val mappedType = when (record.type) {
+                                            "ChatUser" -> "Chat (You)"
+                                            "ChatBot" -> "Chat (AI)"
+                                            else -> record.type
+                                        }
+                                        val title = record.title
+                                        val details = if (record.type == "ChatUser" || record.type == "ChatBot") "" else record.details
+                                        reportBuilder.append("[${index + 1}] TYPE: $mappedType | DATE: $dateStr\n")
+                                        reportBuilder.append("CONTENT/TITLE: $title\n")
+                                        if (details.isNotEmpty()) {
+                                            reportBuilder.append("DETAILS: $details\n")
+                                        }
+                                        reportBuilder.append("----------------------------------------\n\n")
+                                    }
+                                    val filename = "SmartVisionAI_HistoryReport_${System.currentTimeMillis() / 1000}.txt"
+                                    com.smartvision.ai.utils.FileExportHelper.saveTextFile(ctx, filename, reportBuilder.toString())
+                                        .onSuccess {
+                                            android.widget.Toast.makeText(ctx, "Report saved: $filename", android.widget.Toast.LENGTH_LONG).show()
+                                        }
+                                        .onFailure {
+                                            android.widget.Toast.makeText(ctx, "Failed to export: ${it.message}", android.widget.Toast.LENGTH_LONG).show()
+                                        }
+                                }
+                        )
+                        Spacer(Modifier.width(16.dp))
+                    }
                     Text(
                         "Clear All",
                         color = NeonPink,
@@ -91,11 +146,37 @@ fun HistoryScreen(
                     items(filtered) { item ->
                         val accent = when (item.type) {
                             "OCR"      -> AccentOCR
-                            "Chat"     -> AccentAI
+                            "Translation" -> AccentTranslate
+                            "Voice"    -> AccentVoice
+                            "ChatUser", "ChatBot" -> AccentAI
                             "Waste"    -> AccentWaste
                             "Medicine" -> AccentMedicine
+                            "QR Scan", "QR" -> AccentQR
+                            "Object"   -> AccentObject
+                            "Document" -> AccentDocument
                             else       -> NeonBlue
                         }
+                        val emoji = when (item.type) {
+                            "OCR"      -> "📷"
+                            "Translation" -> "🌐"
+                            "Voice"    -> "🎙️"
+                            "ChatUser" -> "👤"
+                            "ChatBot"  -> "🤖"
+                            "Waste"    -> "♻️"
+                            "Medicine" -> "💊"
+                            "QR Scan", "QR" -> "🔍"
+                            "Object"   -> "👁️"
+                            "Document" -> "📄"
+                            else       -> "📜"
+                        }
+                        val isChat = item.type == "ChatUser" || item.type == "ChatBot"
+                        val titleText = when (item.type) {
+                            "ChatUser" -> "You"
+                            "ChatBot"  -> "AI Assistant"
+                            else       -> item.title
+                        }
+                        val detailsText = if (isChat) item.title else item.details
+
                         Row(
                             modifier = Modifier.fillMaxWidth()
                                 .clip(RoundedCornerShape(14.dp))
@@ -108,14 +189,29 @@ fun HistoryScreen(
                                 modifier = Modifier.size(42.dp).clip(RoundedCornerShape(10.dp)).background(accent.copy(0.15f)),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text(item.type.take(2).uppercase(), color = accent, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                Text(emoji, fontSize = 20.sp)
                             }
                             Spacer(Modifier.width(12.dp))
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(item.title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
-                                Text(item.details, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+                                Text(
+                                    text = titleText,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = if (isChat) accent else MaterialTheme.colorScheme.onSurface,
+                                    maxLines = if (isChat) 1 else 2
+                                )
+                                Text(
+                                    text = detailsText,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = if (isChat) 5 else 2
+                                )
                             }
-                            Text(fmt.format(item.createdAt), style = MaterialTheme.typography.labelSmall, color = ext.textHint)
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = fmt.format(java.util.Date(item.createdAt)),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = ext.textHint
+                            )
                         }
                     }
                 }
@@ -123,3 +219,4 @@ fun HistoryScreen(
         }
     }
 }
+

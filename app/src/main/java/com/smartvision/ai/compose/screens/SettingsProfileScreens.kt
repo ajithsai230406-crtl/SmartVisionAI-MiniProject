@@ -31,6 +31,13 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.ApiException
+import com.google.firebase.auth.FirebaseAuth
+import com.smartvision.ai.R
 
 // ══════════════════════════════════════════════════════════════════════════════
 // SETTINGS SCREEN — Premium Full-Featured
@@ -43,18 +50,20 @@ fun SettingsScreen(
     isDarkTheme: Boolean,
     onThemeToggle: () -> Unit,
     onNavigate: (String) -> Unit,
-    viewModel: SettingsViewModel = hiltViewModel()
+    onLogout: () -> Unit,
+    viewModel: SettingsViewModel = hiltViewModel(),
+    authViewModel: AuthViewModel = hiltViewModel()
 ) {
     val ctx   = LocalContext.current
     val ext   = MaterialTheme.extended
     val scope = rememberCoroutineScope()
 
-    var voiceSpeed    by remember { mutableStateOf(1.0f) }
-    var fontSize      by remember { mutableStateOf(1) }
-    var cacheCleared  by remember { mutableStateOf(false) }
-    var notifEnabled  by remember { mutableStateOf(true) }
-    var hapticEnabled by remember { mutableStateOf(true) }
-    var autoSave      by remember { mutableStateOf(true) }
+    val voiceSpeed by viewModel.voiceSpeed.collectAsStateWithLifecycle()
+    val fontSize by viewModel.fontSize.collectAsStateWithLifecycle()
+    val notifEnabled by viewModel.notifEnabled.collectAsStateWithLifecycle()
+    val hapticEnabled by viewModel.hapticEnabled.collectAsStateWithLifecycle()
+    val autoSave by viewModel.autoSave.collectAsStateWithLifecycle()
+    var cacheCleared by remember { mutableStateOf(false) }
 
     val autoDeletePeriod by viewModel.autoDeletePeriod.collectAsStateWithLifecycle()
     val autoDeleteOcr by viewModel.autoDeleteOcr.collectAsStateWithLifecycle()
@@ -64,8 +73,11 @@ fun SettingsScreen(
     val autoDeleteMedicine by viewModel.autoDeleteMedicine.collectAsStateWithLifecycle()
     val autoDeleteTranslation by viewModel.autoDeleteTranslation.collectAsStateWithLifecycle()
 
-    val cacheSize   = remember { getAppCacheSize(ctx) }
+    val cacheSize   = remember(cacheCleared) { getAppCacheSize(ctx) }
     val storageInfo = remember { getStorageInfo() }
+
+    val profile by authViewModel.profile.collectAsStateWithLifecycle()
+    val avatarLetter = (profile.name.firstOrNull() ?: 'A').toString().uppercase()
 
     GradientBackground {
         Column(Modifier.fillMaxSize()) {
@@ -86,20 +98,72 @@ fun SettingsScreen(
                 modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                SettingsSection("👤 User Profile")
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(ext.glassCard)
+                        .border(1.dp, ext.glassBorder, RoundedCornerShape(16.dp))
+                        .padding(16.dp)
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(60.dp)
+                                .clip(CircleShape)
+                                .background(NeonBlue.copy(0.1f))
+                                .border(1.5.dp, NeonBlue, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            val presetEmoji = remember(profile.photoUrl) { getPresetEmoji(profile.photoUrl) }
+                            if (presetEmoji.isNotEmpty()) {
+                                Text(presetEmoji, fontSize = 28.sp)
+                            } else if (!profile.photoUrl.isNullOrEmpty()) {
+                                AsyncImage(
+                                    model = profile.photoUrl,
+                                    contentDescription = "Profile Photo",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                Text(avatarLetter, fontSize = 24.sp, color = NeonBlue, fontWeight = FontWeight.ExtraBold)
+                            }
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = profile.name,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = profile.email,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
                 SettingsSection("🎨 Appearance")
                 ThemeToggleCard(isDarkTheme = isDarkTheme, onToggle = onThemeToggle)
-                FontSizeCard(selected = fontSize, onSelect = { fontSize = it })
+                FontSizeCard(selected = fontSize, onSelect = { viewModel.setFontSize(it) })
 
                 SettingsSection("🔊 Voice & Sound")
-                VoiceSpeedCard(speed = voiceSpeed, onSpeedChange = { voiceSpeed = it })
-                PremiumToggleRow("🔔", "Push Notifications", "Scan results, AI tips", notifEnabled) { notifEnabled = it }
-                PremiumToggleRow("📳", "Haptic Feedback", "Vibration on interactions", hapticEnabled) { hapticEnabled = it }
+                VoiceSpeedCard(speed = voiceSpeed, onSpeedChange = { viewModel.setVoiceSpeed(it) })
+                PremiumToggleRow("🔔", "Push Notifications", "Scan results, AI tips", notifEnabled) { viewModel.setNotifEnabled(it) }
+                PremiumToggleRow("📳", "Haptic Feedback", "Vibration on interactions", hapticEnabled) { viewModel.setHapticEnabled(it) }
+                LegalRowCompose("⚙️", "Configure Notifications") { onNavigate(com.smartvision.ai.compose.navigation.Routes.NOTIFICATION_SETTINGS) }
 
                 SettingsSection("💾 Storage")
                 CacheClearCard(sizeLabel = cacheSize, cleared = cacheCleared) {
                     scope.launch { clearCache(ctx); cacheCleared = true }
                 }
-                PremiumToggleRow("📥", "Auto-save Scans", "Save to gallery automatically", autoSave) { autoSave = it }
+                PremiumToggleRow("📥", "Auto-save Scans", "Save to gallery automatically", autoSave) { viewModel.setAutoSave(it) }
 
                 SettingsSection("🧹 Auto Delete History")
                 RetentionPeriodCard(selectedPeriod = autoDeletePeriod) { viewModel.setAutoDeletePeriod(it) }
@@ -119,10 +183,23 @@ fun SettingsScreen(
                 LegalRowCompose("🔒", "Privacy Policy") { onNavigate(com.smartvision.ai.compose.navigation.Routes.PRIVACY_POLICY) }
                 LegalRowCompose("📄", "Terms & Conditions") { onNavigate(com.smartvision.ai.compose.navigation.Routes.TERMS_CONDITIONS) }
                 LegalRow("💬", "Send Feedback",       "mailto:support@smartvisionai.app",       ctx)
-                LegalRow("⭐", "Rate the App",        "https://play.google.com/store",          ctx)
 
                 SettingsSection("ℹ️ About")
                 AppInfoCard()
+
+                Spacer(Modifier.height(10.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(ext.glassCard)
+                        .border(1.dp, NeonPink.copy(0.4f), RoundedCornerShape(16.dp))
+                        .clickable { onLogout() }
+                        .padding(vertical = 14.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("🚪 Sign Out Session", style = MaterialTheme.typography.titleSmall, color = NeonPink, fontWeight = FontWeight.SemiBold)
+                }
 
                 Spacer(Modifier.height(32.dp).navigationBarsPadding())
             }
@@ -157,7 +234,7 @@ private fun ThemeToggleCard(isDarkTheme: Boolean, onToggle: () -> Unit) {
 @Composable
 private fun FontSizeCard(selected: Int, onSelect: (Int) -> Unit) {
     val ext = MaterialTheme.extended
-    val items = listOf(Triple("Small", "Aa", 12.sp), Triple("Medium", "Aa", 15.sp), Triple("Large", "Aa", 18.sp))
+    val items = listOf(Triple("Small", "Aa", 12.sp), Triple("Medium", "Aa", 15.sp), Triple("Large", "Aa", 18.sp), Triple("X-Large", "Aa", 21.sp))
     Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(ext.glassCard).border(1.dp, ext.glassBorder, RoundedCornerShape(16.dp)).padding(16.dp)) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("📝 Font Size", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
@@ -348,6 +425,39 @@ fun ProfileScreen(
     val profile by authViewModel.profile.collectAsStateWithLifecycle()
     val provider = remember(profile) { authViewModel.getLoginProvider() }
     var showEditDialog by remember { mutableStateOf(false) }
+    var showLinkEmailDialog by remember { mutableStateOf(false) }
+
+    val creationTimestamp = remember(profile) {
+        FirebaseAuth.getInstance().currentUser?.metadata?.creationTimestamp ?: System.currentTimeMillis()
+    }
+    val creationDate = remember(creationTimestamp) {
+        val date = java.util.Date(creationTimestamp)
+        val formatter = java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.getDefault())
+        formatter.format(date)
+    }
+
+    val googleSignInClient = remember {
+        val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestIdToken(ctx.getString(R.string.default_web_client_id))
+            .requestEmail()
+            .build()
+        GoogleSignIn.getClient(ctx, gso)
+    }
+
+    val linkGoogleLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult(),
+        onResult = { result ->
+            val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+            try {
+                val account = task.getResult(ApiException::class.java)
+                if (account != null) {
+                    authViewModel.linkGoogle(account) { }
+                }
+            } catch (e: Exception) {
+                // Handle link error
+            }
+        }
+    )
 
     val darkMode by settingsViewModel.darkMode.collectAsStateWithLifecycle()
     val autoSave by settingsViewModel.autoSave.collectAsStateWithLifecycle()
@@ -395,6 +505,17 @@ fun ProfileScreen(
             onSave = { newName, newEmail, newPhotoUrl ->
                 authViewModel.updateUserProfile(newName, newEmail, newPhotoUrl) {
                     showEditDialog = false
+                }
+            }
+        )
+    }
+
+    if (showLinkEmailDialog) {
+        LinkEmailDialog(
+            onDismiss = { showLinkEmailDialog = false },
+            onLink = { email, password ->
+                authViewModel.linkEmail(email, password) {
+                    showLinkEmailDialog = false
                 }
             }
         )
@@ -488,8 +609,61 @@ fun ProfileScreen(
                 ProfileSectionCard(title = "Account Security & Credentials", icon = "🛡️", isExpanded = expandedSection == "ACCOUNT", onHeaderClick = { toggleSection("ACCOUNT") }) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         AccountDetailRow("Authentication Type", provider)
+                        AccountDetailRow("Account Created", creationDate)
                         AccountDetailRow("Profile Status", "Active Secure Session")
                         AccountDetailRow("Local Database Sync", "Connected Room API")
+
+                        val isGuest = remember(profile) { authViewModel.isGuestUser() }
+                        if (isGuest) {
+                            Spacer(Modifier.height(4.dp))
+                            HorizontalDivider(color = ext.glassBorder, thickness = 0.8.dp)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "Guest Account Upgrade",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = NeonBlue,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                "Link your account to save scan and chat history permanently across devices.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(Color.White)
+                                        .clickable {
+                                            linkGoogleLauncher.launch(googleSignInClient.signInIntent)
+                                        }
+                                        .padding(vertical = 10.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("Google", color = Color(0xFF202124), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(NeonPurple.copy(0.12f))
+                                        .border(1.dp, NeonPurple.copy(0.3f), RoundedCornerShape(10.dp))
+                                        .clickable {
+                                            showLinkEmailDialog = true
+                                        }
+                                        .padding(vertical = 10.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("Email / Password", color = NeonPurple, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+
                         Spacer(Modifier.height(4.dp))
                         Box(
                             modifier = Modifier
@@ -502,6 +676,25 @@ fun ProfileScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             Text("✏️ Edit Profile Info", style = MaterialTheme.typography.bodyMedium, color = NeonBlue, fontWeight = FontWeight.SemiBold)
+                        }
+
+                        val isAdmin = remember(profile.email) {
+                            profile.email.endsWith("@admin.com") || profile.email.endsWith("@smartvision.ai") || profile.email == "guest@smartvision.ai"
+                        }
+                        if (isAdmin) {
+                            Spacer(Modifier.height(8.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(NeonPurple.copy(0.12f))
+                                    .border(1.dp, NeonPurple.copy(0.3f), RoundedCornerShape(10.dp))
+                                    .clickable { onNavigate(com.smartvision.ai.compose.navigation.Routes.ADMIN_DASHBOARD) }
+                                    .padding(vertical = 10.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("📊 Admin Analytics Dashboard", style = MaterialTheme.typography.bodyMedium, color = NeonPurple, fontWeight = FontWeight.SemiBold)
+                            }
                         }
                     }
                 }
@@ -525,6 +718,19 @@ fun ProfileScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         PremiumToggleRow("🔔", "Push Notifications", "Alerts on scanned results & AI updates", notifEnabled) { settingsViewModel.setNotifEnabled(it) }
                         PremiumToggleRow("📳", "Haptic Feedback", "Tactile pulse on scans", hapticEnabled) { settingsViewModel.setHapticEnabled(it) }
+                        Spacer(Modifier.height(4.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(NeonBlue.copy(0.12f))
+                                .border(1.dp, NeonBlue.copy(0.3f), RoundedCornerShape(10.dp))
+                                .clickable { onNavigate(com.smartvision.ai.compose.navigation.Routes.NOTIFICATION_SETTINGS) }
+                                .padding(vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("⚙️ Configure Notifications", style = MaterialTheme.typography.bodyMedium, color = NeonBlue, fontWeight = FontWeight.SemiBold)
+                        }
                     }
                 }
 
@@ -555,7 +761,6 @@ fun ProfileScreen(
                 ProfileSectionCard(title = "Support Desk & Project Info", icon = "💬", isExpanded = expandedSection == "SUPPORT", onHeaderClick = { toggleSection("SUPPORT") }) {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         LegalRow("💬", "Send Feedback Report", "mailto:support@smartvisionai.app", ctx)
-                        LegalRow("⭐", "Rate on Google Play Store", "https://play.google.com/store", ctx)
                         HorizontalDivider(color = ext.glassBorder, thickness = 0.8.dp)
                         AppInfoCard()
                     }
@@ -1056,4 +1261,157 @@ fun EditProfileDialog(
         }
     )
 }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun LinkEmailDialog(
+    onDismiss: () -> Unit,
+    onLink: (email: String, password: String) -> Unit
+) {
+    val ext = MaterialTheme.extended
+
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var showPwd by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+        modifier = Modifier
+            .fillMaxWidth(0.92f)
+            .clip(RoundedCornerShape(24.dp))
+            .background(ext.glassCard)
+            .border(1.dp, ext.glassBorder, RoundedCornerShape(24.dp))
+            .padding(20.dp),
+        content = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        "🔗 Link Email Account",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "Upgrade guest session to a secure email account",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = NeonBlue
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(ext.glassCard)
+                        .border(1.dp, ext.glassBorder, RoundedCornerShape(16.dp))
+                        .padding(14.dp)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                "Email Address",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            OutlinedTextField(
+                                value = email,
+                                onValueChange = { email = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                textStyle = MaterialTheme.typography.bodyMedium.copy(color = Color.White),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = NeonBlue,
+                                    unfocusedBorderColor = ext.glassBorder,
+                                    focusedContainerColor = Color.Transparent,
+                                    unfocusedContainerColor = Color.Transparent
+                                )
+                            )
+                        }
+
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                "Password",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            OutlinedTextField(
+                                value = password,
+                                onValueChange = { password = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                visualTransformation = if (showPwd) VisualTransformation.None else PasswordVisualTransformation(),
+                                textStyle = MaterialTheme.typography.bodyMedium.copy(color = Color.White),
+                                trailingIcon = {
+                                    Text(
+                                        if (showPwd) "🙈" else "👁",
+                                        fontSize = 18.sp,
+                                        modifier = Modifier
+                                            .padding(end = 8.dp)
+                                            .clickable { showPwd = !showPwd }
+                                    )
+                                },
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = NeonBlue,
+                                    unfocusedBorderColor = ext.glassBorder,
+                                    focusedContainerColor = Color.Transparent,
+                                    unfocusedContainerColor = Color.Transparent
+                                )
+                            )
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(ext.glassCard)
+                            .border(1.dp, ext.glassBorder, RoundedCornerShape(12.dp))
+                            .clickable { onDismiss() }
+                            .padding(vertical = 12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "Cancel",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Brush.linearGradient(listOf(NeonBlue, NeonPurple)))
+                            .border(1.dp, Color.White.copy(0.3f), RoundedCornerShape(12.dp))
+                            .clickable {
+                                if (email.isNotBlank() && password.length >= 6) {
+                                    onLink(email, password)
+                                }
+                            }
+                            .padding(vertical = 12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "Link Account",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+    )
+}
+
 

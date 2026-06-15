@@ -15,6 +15,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import androidx.compose.runtime.remember
 
 // ─── Dark Neon Color Scheme ───────────────────────────────────────────────────
 private val DarkColorScheme = darkColorScheme(
@@ -144,15 +154,6 @@ fun getAdjustedColors(
 
     when (colorblindMode) {
         "PROTANOMALY", "DEUTERANOMALY" -> {
-            blue = Color(0xFF007DFF)
-            purple = Color(0xFFC37FFF)
-            cyan = Color(0xFF00FFFF)
-            green = Color(0xFFFFFF00)
-            pink = Color(0xFFFFFFFF)
-            orange = Color(0xFFFFA500)
-            yellow = Color(0xFFFFFF00)
-        }
-        "TRITANOMALY" -> {
             blue = Color(0xFFFF2D78)
             purple = Color(0xFFC37FFF)
             cyan = Color(0xFF00FF00)
@@ -160,6 +161,15 @@ fun getAdjustedColors(
             pink = Color(0xFFFF2D78)
             orange = Color(0xFFFF5722)
             yellow = Color(0xFFFF2D78)
+        }
+        "TRITANOMALY" -> {
+            blue = Color(0xFF007DFF)
+            purple = Color(0xFFC37FFF)
+            cyan = Color(0xFF00FFFF)
+            green = Color(0xFFFFFF00)
+            pink = Color(0xFFFFFFFF)
+            orange = Color(0xFFFFA500)
+            yellow = Color(0xFFFFFF00)
         }
     }
 
@@ -256,7 +266,7 @@ fun SmartVisionTheme(
     }
 
     val extendedColors = getAdjustedColors(darkTheme, colorblindMode, highContrast)
-    val scaledTypography = getScaledTypography(fontSizeMultiplier)
+    val scaledTypography = getScaledTypography(1.0f) // Scale via LocalDensity instead of duplicate typography scaling
 
     // Status bar styling — transparent edge-to-edge
     val view = LocalView.current
@@ -268,13 +278,22 @@ fun SmartVisionTheme(
         }
     }
 
+    val currentDensity = LocalDensity.current
+    val customDensity = remember(currentDensity, fontSizeMultiplier) {
+        object : Density {
+            override val density: Float get() = currentDensity.density
+            override val fontScale: Float get() = currentDensity.fontScale * fontSizeMultiplier
+        }
+    }
+
     CompositionLocalProvider(
         LocalExtendedColors provides extendedColors,
         LocalLargeButtons provides largeButtons,
         LocalHighContrast provides highContrast,
         LocalColorblindMode provides colorblindMode,
         LocalVoiceGuidance provides voiceGuidance,
-        LocalAiVoiceGuidance provides aiVoiceGuidance
+        LocalAiVoiceGuidance provides aiVoiceGuidance,
+        LocalDensity provides customDensity
     ) {
         MaterialTheme(
             colorScheme = colorScheme,
@@ -287,3 +306,46 @@ fun SmartVisionTheme(
 // Convenience accessor
 val MaterialTheme.extended: ExtendedColors
     @Composable get() = LocalExtendedColors.current
+
+// Colorblind Daltonization Modifier
+fun Modifier.colorblindFilter(mode: String): Modifier = this.drawWithCache {
+    val matrix = when (mode) {
+        "PROTANOMALY" -> ColorMatrix(floatArrayOf(
+            1.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+            0.303f, 0.697f, 0.0f, 0.0f, 0.0f,
+            0.303f, -0.303f, 1.0f, 0.0f, 0.0f,
+            0.0f, 0.0f, 0.0f, 1.0f, 0.0f
+        ))
+        "DEUTERANOMALY" -> ColorMatrix(floatArrayOf(
+            0.51f, 0.49f, 0.0f, 0.0f, 0.0f,
+            0.0f, 1.0f, 0.0f, 0.0f, 0.0f,
+            -0.49f, 0.49f, 1.0f, 0.0f, 0.0f,
+            0.0f, 0.0f, 0.0f, 1.0f, 0.0f
+        ))
+        "TRITANOMALY" -> ColorMatrix(floatArrayOf(
+            1.0f, -0.33f, 0.33f, 0.0f, 0.0f,
+            0.0f, 0.67f, 0.33f, 0.0f, 0.0f,
+            0.0f, 0.0f, 1.0f, 0.0f, 0.0f,
+            0.0f, 0.0f, 0.0f, 1.0f, 0.0f
+        ))
+        else -> null
+    }
+
+    if (matrix != null) {
+        val filter = ColorFilter.colorMatrix(matrix)
+        val paint = Paint().apply {
+            colorFilter = filter
+        }
+        onDrawWithContent {
+            drawIntoCanvas { canvas ->
+                canvas.saveLayer(Rect(0f, 0f, size.width, size.height), paint)
+                drawContent()
+                canvas.restore()
+            }
+        }
+    } else {
+        onDrawWithContent {
+            drawContent()
+        }
+    }
+}

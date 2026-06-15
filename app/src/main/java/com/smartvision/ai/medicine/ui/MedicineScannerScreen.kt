@@ -4,6 +4,7 @@ import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.*
+import com.smartvision.ai.medicine.data.DailyMedicinesDatabase
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -61,16 +62,31 @@ fun MedicineScannerScreen(
     val suggestions by viewModel.suggestions.collectAsStateWithLifecycle()
     val keyboard    = LocalSoftwareKeyboardController.current
 
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel.stopVoice()
+        }
+    }
+
     // Disclaimer dialog
     if (viewModel.showDisclaimer) {
         MedDisclaimerDialog(onAccept = { viewModel.dismissDisclaimer() })
     }
 
+    // Directory list dialog
+    viewModel.selectedDirectoryCategory?.let { category ->
+        MedDirectoryDialog(
+            category = category,
+            onClose = { viewModel.closeDirectoryCategory() },
+            onSelect = { med -> viewModel.selectMedicine(med) }
+        )
+    }
+
     // Camera overlay (full screen)
     if (viewModel.showCamera) {
         MedCameraScreen(
-            onTextDetected = { text ->
-                viewModel.analyzeFromOcr(text)
+            onImageCaptured = { bitmap ->
+                viewModel.analyzeFromBitmap(bitmap)
             },
             onClose = { viewModel.closeCamera() }
         )
@@ -118,7 +134,8 @@ fun MedicineScannerScreen(
                         onCamera    = { viewModel.openCamera() },
                         onDemo      = { viewModel.quickDemoScan() },
                         onSuggestion = { viewModel.analyzeByName(it) },
-                        onHistory   = { viewModel.openHistory() }
+                        onHistory   = { viewModel.openHistory() },
+                        onCategoryClick = { viewModel.openDirectoryCategory(it) }
                     )
                     is MedicineScanState.OcrRunning, is MedicineScanState.AiAnalyzing -> {
                         val progress = when (currentState) {
@@ -218,7 +235,8 @@ private fun MedTopBar(
 private fun MedIdleScreen(
     query: String, suggestions: List<String>, history: List<MedicineScanRecord>,
     onQuery: (String) -> Unit, onAnalyze: () -> Unit, onCamera: () -> Unit,
-    onDemo: () -> Unit, onSuggestion: (String) -> Unit, onHistory: () -> Unit
+    onDemo: () -> Unit, onSuggestion: (String) -> Unit, onHistory: () -> Unit,
+    onCategoryClick: (MedicineType) -> Unit
 ) {
     val ext = MaterialTheme.extended
     LazyColumn(
@@ -323,7 +341,7 @@ private fun MedIdleScreen(
                             row.forEach { type ->
                                 Box(Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(ext.glassCard)
                                     .border(1.dp, ext.glassBorder, RoundedCornerShape(10.dp))
-                                    .clickable { onSuggestion(type.label) }.padding(vertical = 8.dp), Alignment.Center) {
+                                    .clickable { onCategoryClick(type) }.padding(vertical = 8.dp), Alignment.Center) {
                                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                         Text(type.emoji, fontSize = 18.sp)
                                         Text(type.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
@@ -483,20 +501,85 @@ private fun MedResultScreen(
 ) {
     val ext = MaterialTheme.extended
 
+    val inf = rememberInfiniteTransition(label = "flashingDanger")
+    val flashAlpha by inf.animateFloat(
+        initialValue = 0.2f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(800, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "alpha"
+    )
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Emergency warning banner
-        if (info.emergencyWarning != null) {
+        // Flashing red danger banner (for High Risk drugs or emergency warnings)
+        if (info.safetyLevel == SafetyLevel.DANGER || info.emergencyWarning != null) {
             item {
-                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
-                    .background(MedRed.copy(0.12f)).border(2.dp, MedRed, RoundedCornerShape(14.dp))
-                    .padding(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("🚨", fontSize = 20.sp)
-                    Text(info.emergencyWarning, style = MaterialTheme.typography.bodySmall,
-                        color = MedRed, fontWeight = FontWeight.SemiBold)
+                val warningText = info.emergencyWarning ?: "⚠️ WARNING: High-risk medication. Take strictly as directed. Keep away from heat, light, and children."
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(MedRed.copy(0.12f * flashAlpha))
+                        .border(2.dp, MedRed.copy(flashAlpha), RoundedCornerShape(14.dp))
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("🚨", fontSize = 22.sp)
+                    Text(
+                        text = warningText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MedRed,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
+
+        // Glowing orange Rx prescription banner
+        if (info.prescriptionOnly) {
+            item {
+                val infPrescr = rememberInfiniteTransition(label = "glowRx")
+                val glowAlpha by infPrescr.animateFloat(
+                    initialValue = 0.3f,
+                    targetValue = 0.9f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(1200, easing = EaseInOutSine),
+                        repeatMode = RepeatMode.Reverse
+                    ),
+                    label = "glow"
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(MedOrange.copy(0.08f))
+                        .border(1.5.dp, MedOrange.copy(glowAlpha), RoundedCornerShape(14.dp))
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("🔒", fontSize = 20.sp)
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = "Prescription Only Medication (Rx)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MedOrange,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "This medicine requires a valid prescription from a certified medical practitioner.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MedOrange.copy(0.8f)
+                        )
+                    }
                 }
             }
         }
@@ -565,8 +648,30 @@ private fun MedHeaderCard(info: MedicineInfo, isFavorite: Boolean, isSpeaking: B
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.Top) {
                 Column(Modifier.weight(1f)) {
-                    Text(info.name, style = MaterialTheme.typography.headlineSmall,
-                        color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.ExtraBold)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(info.name, style = MaterialTheme.typography.headlineSmall,
+                            color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.ExtraBold,
+                            modifier = Modifier.weight(1f, fill = false))
+                        
+                        // Confidence score badge
+                        Box(
+                            Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(MedCyan.copy(0.15f))
+                                .border(1.dp, MedCyan.copy(0.4f), RoundedCornerShape(6.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "🎯 ${info.confidenceScore}% Match",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MedCyan,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                     if (info.genericName.isNotBlank())
                         Text(info.genericName, style = MaterialTheme.typography.bodySmall, color = safetyColor)
                     if (info.brandName != info.name && info.brandName.isNotBlank()) {
@@ -712,15 +817,93 @@ private fun MedInfoTab(info: MedicineInfo) {
                 }
             }
         }
-        if (info.whoShouldAvoid.isNotEmpty()) MedListCard("🚫 Who Should Avoid", info.whoShouldAvoid, MedRed)
+        if (info.whoShouldAvoid.isNotEmpty()) MedListCard("🚫 Precautions (Who Should Avoid)", info.whoShouldAvoid, MedRed)
     }
 }
 
 @Composable
 private fun MedSideEffectsTab(info: MedicineInfo) {
+    val ext = MaterialTheme.extended
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        MedListCard("⚠️ Side Effects", info.sideEffects, MedOrange)
-        if (info.allergyWarnings.isNotEmpty()) MedListCard("🤧 Allergy Warnings", info.allergyWarnings, MedRed)
+        if (info.sideEffects.isEmpty()) {
+            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(ext.glassCard).border(1.dp, ext.glassBorder, RoundedCornerShape(14.dp)).padding(16.dp), Alignment.Center) {
+                Text("No side effects listed", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        } else {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(ext.glassCard)
+                    .border(1.dp, ext.glassBorder, RoundedCornerShape(14.dp))
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text("⚠️ Side Effects by Severity", style = MaterialTheme.typography.labelMedium, color = MedOrange, fontWeight = FontWeight.SemiBold)
+                
+                // Group side effects
+                val common = mutableListOf<String>()
+                val uncommon = mutableListOf<String>()
+                val rareSevere = mutableListOf<String>()
+
+                info.sideEffects.forEach { effect ->
+                    val severity = info.sideEffectSeverities[effect]
+                    when {
+                        severity?.equals("Common", ignoreCase = true) == true -> common.add(effect)
+                        severity?.equals("Uncommon", ignoreCase = true) == true -> uncommon.add(effect)
+                        severity?.equals("Rare/Severe", ignoreCase = true) == true || severity?.equals("Rare", ignoreCase = true) == true || severity?.equals("Severe", ignoreCase = true) == true -> rareSevere.add(effect)
+                        else -> {
+                            val lower = effect.lowercase()
+                            if (lower.contains("damage") || lower.contains("failure") || lower.contains("severe") || lower.contains("anaphylaxis") || lower.contains("shock") || lower.contains("death")) {
+                                rareSevere.add(effect)
+                            } else if (lower.contains("dizziness") || lower.contains("rash") || lower.contains("fatigue")) {
+                                uncommon.add(effect)
+                            } else {
+                                common.add(effect)
+                            }
+                        }
+                    }
+                }
+
+                if (common.isNotEmpty()) {
+                    SeverityGroup(title = "Common Side Effects", items = common, bulletColor = MedGreen, textColor = MaterialTheme.colorScheme.onSurface)
+                }
+                
+                if (uncommon.isNotEmpty()) {
+                    SeverityGroup(title = "Uncommon Side Effects", items = uncommon, bulletColor = MedOrange, textColor = MaterialTheme.colorScheme.onSurface)
+                }
+
+                if (rareSevere.isNotEmpty()) {
+                    SeverityGroup(title = "Rare / Severe (Seek medical attention)", items = rareSevere, bulletColor = MedRed, textColor = MedRed.copy(0.9f))
+                }
+            }
+        }
+
+        if (info.allergyWarnings.isNotEmpty()) {
+            MedListCard("🤧 Allergy Warnings", info.allergyWarnings, MedRed)
+        }
+    }
+}
+
+@Composable
+private fun SeverityGroup(title: String, items: List<String>, bulletColor: Color, textColor: Color) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(title, style = MaterialTheme.typography.labelSmall, color = bulletColor, fontWeight = FontWeight.Bold)
+        items.forEach { item ->
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(bulletColor)
+                )
+                Text(item, style = MaterialTheme.typography.bodySmall, color = textColor)
+            }
+        }
+        Spacer(Modifier.height(4.dp))
     }
 }
 
@@ -728,17 +911,52 @@ private fun MedSideEffectsTab(info: MedicineInfo) {
 private fun MedInteractionsTab(info: MedicineInfo) {
     val ext = MaterialTheme.extended
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        if (info.interactions.isEmpty()) {
+        if (info.interactions.isEmpty() && info.interactionWarnings.isEmpty()) {
             Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(ext.glassCard).border(1.dp, ext.glassBorder, RoundedCornerShape(14.dp)).padding(16.dp), Alignment.Center) {
                 Text("No drug interactions listed", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else {
-            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(ext.glassCard).border(1.dp, ext.glassBorder, RoundedCornerShape(14.dp)).padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(ext.glassCard)
+                    .border(1.dp, ext.glassBorder, RoundedCornerShape(14.dp))
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 Text("🔄 Drug Interactions", style = MaterialTheme.typography.labelMedium, color = MedPurple, fontWeight = FontWeight.SemiBold)
+                
                 info.interactions.forEach { interaction ->
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
-                        Box(Modifier.size(8.dp).clip(CircleShape).background(MedPurple).align(Alignment.CenterVertically))
+                        Box(
+                            Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(MedPurple)
+                                .align(Alignment.CenterVertically)
+                        )
                         Text(interaction, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
+                    }
+                }
+
+                if (info.interactionWarnings.isNotEmpty()) {
+                    HorizontalDivider(color = ext.glassBorder)
+                    Text("⚠️ Specific Interaction Warnings", style = MaterialTheme.typography.labelSmall, color = MedRed, fontWeight = FontWeight.Bold)
+                    info.interactionWarnings.forEach { warning ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MedRed.copy(0.06f))
+                                .border(1.dp, MedRed.copy(0.2f), RoundedCornerShape(10.dp))
+                                .padding(8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("⚡", fontSize = 14.sp)
+                            Text(warning, style = MaterialTheme.typography.labelSmall, color = MedRed.copy(0.9f))
+                        }
                     }
                 }
             }
@@ -825,7 +1043,7 @@ private fun MedAiSummaryTab(info: MedicineInfo) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("🤖", fontSize = 20.sp)
                     Text("AI Summary", style = MaterialTheme.typography.titleSmall, color = MedGreen, fontWeight = FontWeight.Bold)
-                    NeonBadge("Gemini AI", MedGreen)
+                    NeonBadge("OpenRouter AI", MedGreen)
                 }
                 Text(
                     info.aiSummary.ifBlank { "${info.name} is a ${info.category} used for ${info.uses.take(2).joinToString(" and ")}. Dosage: ${info.dosage}. Safety Level: ${info.safetyLevel.label}." },
@@ -869,11 +1087,28 @@ private fun MedSafetyScoreBadge(score: Int, color: Color) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  CAMERA SCREEN — Live OCR scanning
 // ══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
+//  CAMERA SCREEN — Photo Capture for OCR
+// ══════════════════════════════════════════════════════════════════════════════
 @Composable
-fun MedCameraScreen(onTextDetected: (String) -> Unit, onClose: () -> Unit) {
+fun MedCameraScreen(onImageCaptured: (android.graphics.Bitmap) -> Unit, onClose: () -> Unit) {
     val ctx         = LocalContext.current
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     var isProcessing by remember { mutableStateOf(false) }
+    val imageCapture = remember { ImageCapture.Builder().build() }
+
+    DisposableEffect(lifecycleOwner) {
+        onDispose {
+            val future = ProcessCameraProvider.getInstance(ctx)
+            future.addListener({
+                try {
+                    future.get().unbindAll()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }, ContextCompat.getMainExecutor(ctx))
+        }
+    }
 
     val inf  = rememberInfiniteTransition(label = "camScan")
     val scanY by inf.animateFloat(0.05f, 0.95f, infiniteRepeatable(tween(1600, easing = LinearEasing), RepeatMode.Reverse), label = "s")
@@ -884,37 +1119,22 @@ fun MedCameraScreen(onTextDetected: (String) -> Unit, onClose: () -> Unit) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { context ->
-                val previewView = PreviewView(context)
+                val previewView = PreviewView(context).apply {
+                    scaleType = PreviewView.ScaleType.FILL_CENTER
+                }
                 val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
                 cameraProviderFuture.addListener({
                     val cameraProvider = cameraProviderFuture.get()
                     val preview = Preview.Builder().build().also { it.surfaceProvider = previewView.surfaceProvider }
-                    val imageAnalyzer = ImageAnalysis.Builder()
-                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST).build()
-
-                    val textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-
-                    imageAnalyzer.setAnalyzer(ContextCompat.getMainExecutor(context)) { imageProxy ->
-                        if (!isProcessing) {
-                            val mediaImage = imageProxy.image
-                            if (mediaImage != null) {
-                                val inputImage = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
-                                textRecognizer.process(inputImage)
-                                    .addOnSuccessListener { visionText ->
-                                        val text = visionText.text.trim()
-                                        if (text.length > 5) {
-                                            isProcessing = true
-                                            onTextDetected(text)
-                                        }
-                                    }
-                                    .addOnCompleteListener { imageProxy.close() }
-                            } else { imageProxy.close() }
-                        } else { imageProxy.close() }
-                    }
 
                     runCatching {
                         cameraProvider.unbindAll()
-                        cameraProvider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageAnalyzer)
+                        cameraProvider.bindToLifecycle(
+                            lifecycleOwner,
+                            CameraSelector.DEFAULT_BACK_CAMERA,
+                            preview,
+                            imageCapture
+                        )
                     }
                 }, ContextCompat.getMainExecutor(context))
                 previewView
@@ -946,22 +1166,95 @@ fun MedCameraScreen(onTextDetected: (String) -> Unit, onClose: () -> Unit) {
             }
         }
 
-        // Bottom: processing / close
-        Box(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(24.dp)) {
-            if (isProcessing) {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MedCyan, strokeWidth = 2.dp)
-                    Text("Reading label...", color = MedCyan, style = MaterialTheme.typography.bodyMedium)
+        // Bottom: processing / capture button
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 32.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Close button
+                Box(
+                    modifier = Modifier
+                        .size(50.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(0.6f))
+                        .border(1.dp, MedRed.copy(0.4f), CircleShape)
+                        .clickable(onClick = onClose),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("✕", color = MedRed, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 }
-            } else {
-                Box(Modifier.clip(RoundedCornerShape(14.dp)).background(Color.Black.copy(0.7f))
-                    .border(1.dp, MedRed.copy(0.5f), RoundedCornerShape(14.dp))
-                    .clickable(onClick = onClose).padding(horizontal = 28.dp, vertical = 14.dp)) {
-                    Text("✕ Close Camera", color = MedRed, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+
+                // Shutter button
+                Box(
+                    modifier = Modifier
+                        .size(76.dp)
+                        .border(4.dp, Color.White, CircleShape)
+                        .padding(6.dp)
+                        .clip(CircleShape)
+                        .background(if (isProcessing) Color.Gray else Color.White)
+                        .clickable(enabled = !isProcessing) {
+                            isProcessing = true
+                            imageCapture.takePicture(
+                                ContextCompat.getMainExecutor(ctx),
+                                object : ImageCapture.OnImageCapturedCallback() {
+                                    override fun onCaptureSuccess(image: ImageProxy) {
+                                        val bitmap = imageProxyToBitmap(image)
+                                        image.close()
+                                        if (bitmap != null) {
+                                            onImageCaptured(bitmap)
+                                        } else {
+                                            isProcessing = false
+                                        }
+                                    }
+
+                                    override fun onError(exception: ImageCaptureException) {
+                                        isProcessing = false
+                                        exception.printStackTrace()
+                                    }
+                                }
+                            )
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isProcessing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(28.dp),
+                            color = MedCyan,
+                            strokeWidth = 3.dp
+                        )
+                    } else {
+                        Text("📸", fontSize = 28.sp)
+                    }
                 }
+
+                // Spacer for symmetry
+                Spacer(modifier = Modifier.width(50.dp))
             }
         }
     }
+}
+
+private fun imageProxyToBitmap(image: ImageProxy): android.graphics.Bitmap? {
+    val buffer = image.planes[0].buffer
+    buffer.rewind()
+    val bytes = ByteArray(buffer.remaining())
+    buffer.get(bytes)
+    val raw = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+
+    if (image.imageInfo.rotationDegrees != 0) {
+        val matrix = android.graphics.Matrix().apply {
+            postRotate(image.imageInfo.rotationDegrees.toFloat())
+        }
+        return android.graphics.Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, matrix, true)
+    }
+    return raw
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1089,6 +1382,124 @@ private fun MedErrorScreen(message: String, onRetry: () -> Unit) {
             Text(message, style = MaterialTheme.typography.bodySmall, color = MedRed, textAlign = TextAlign.Center)
             Box(Modifier.clip(RoundedCornerShape(14.dp)).background(MedBlue.copy(0.15f)).border(1.dp, MedBlue.copy(0.4f), RoundedCornerShape(14.dp)).clickable(onClick = onRetry).padding(horizontal = 32.dp, vertical = 14.dp)) {
                 Text("Try Again", style = MaterialTheme.typography.titleSmall, color = MedBlue, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  DIRECTORY LIST DIALOG — scrollable grid categories list
+// ══════════════════════════════════════════════════════════════════════════════
+@Composable
+private fun MedDirectoryDialog(
+    category: MedicineType,
+    onClose: () -> Unit,
+    onSelect: (MedicineInfo) -> Unit
+) {
+    val ext = MaterialTheme.extended
+    val medicines = remember(category) {
+        DailyMedicinesDatabase.dailyMedicines.filter { it.medicineType == category }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(0.75f))
+            .clickable(onClick = onClose),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .fillMaxHeight(0.7f)
+                .clip(RoundedCornerShape(24.dp))
+                .background(Brush.linearGradient(listOf(Color(0xFF0A1628), Color(0xFF0D1F3C))))
+                .border(2.dp, MedCyan.copy(0.4f), RoundedCornerShape(24.dp))
+                .clickable(enabled = false) { /* stop propagation */ }
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(category.emoji, fontSize = 24.sp)
+                    Column {
+                        Text(
+                            text = "${category.label} Directory",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = Color.White,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Text(
+                            text = "${medicines.size} commonly used medicines",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MedCyan
+                        )
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(ext.glassCard)
+                        .clickable(onClick = onClose),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("✕", color = Color.White, fontSize = 14.sp)
+                }
+            }
+
+            HorizontalDivider(color = ext.glassBorder)
+
+            // Scrollable List
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(medicines) { med ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(ext.glassCard)
+                            .border(1.dp, ext.glassBorder, RoundedCornerShape(14.dp))
+                            .clickable { onSelect(med) }
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MedBlue.copy(0.12f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(med.medicineType.emoji, fontSize = 18.sp)
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = med.name,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = med.category,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Text("→", color = MedCyan, fontSize = 16.sp)
+                    }
+                }
             }
         }
     }

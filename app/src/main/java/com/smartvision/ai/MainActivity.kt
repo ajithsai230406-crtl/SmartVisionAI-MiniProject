@@ -4,7 +4,11 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.smartvision.ai.compose.navigation.SmartVisionNavHost
 import com.smartvision.ai.ui.theme.SmartVisionTheme
@@ -21,9 +25,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        android.util.Log.d("SmartVision_Main", "onCreate called")
         enableEdgeToEdge()
 
         setContent {
+            android.util.Log.d("SmartVision_Main", "setContent composition started")
             val scope = rememberCoroutineScope()
             val darkMode by settingsRepository.darkMode.collectAsState(initial = true)
             val fontSizeSetting by settingsRepository.fontSize.collectAsState(initial = 1)
@@ -51,10 +57,11 @@ class MainActivity : ComponentActivity() {
                 aiVoiceGuidance = aiVoiceGuidance
             ) {
                 SmartVisionNavHost(
-                    isDarkTheme   = darkMode,
+                    isDarkTheme = darkMode,
                     onThemeToggle = {
-                        val current = darkMode
-                        scope.launch { settingsRepository.setDarkMode(!current) }
+                        scope.launch {
+                            settingsRepository.setDarkMode(!darkMode)
+                        }
                     }
                 )
             }

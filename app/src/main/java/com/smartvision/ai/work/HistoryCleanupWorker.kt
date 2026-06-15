@@ -83,7 +83,12 @@ class HistoryCleanupWorker(
 
         // 4. Perform Room database deletion queries if there are types to delete
         if (typesToDelete.isNotEmpty()) {
-            database.historyDao().deleteByTypesOlderThan(typesToDelete, cutoffTimestamp)
+            val userId = try {
+                com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: "guest_uid"
+            } catch (_: Exception) {
+                "guest_uid"
+            }
+            database.historyDao().deleteByTypesOlderThan(typesToDelete, cutoffTimestamp, userId)
         }
 
         return Result.success()

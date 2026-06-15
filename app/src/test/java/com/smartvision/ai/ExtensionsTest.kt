@@ -43,6 +43,6 @@ class ExtensionsTest {
     @Test
     fun `confidenceColor cyan for high confidence`() {
         val color = confidenceColor(0.9f)
-        assertEquals(0xFF00E5FF, (color.value shr 0).toLong() and 0xFFFFFFFF or 0xFF000000)
+        assertEquals(androidx.compose.ui.graphics.Color(0xFF00E5FF), color)
     }
 }

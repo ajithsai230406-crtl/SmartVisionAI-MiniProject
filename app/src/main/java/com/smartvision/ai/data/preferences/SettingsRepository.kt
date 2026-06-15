@@ -38,6 +38,10 @@ class SettingsRepository @Inject constructor(
     private val largeButtonsKey = booleanPreferencesKey("large_buttons")
     private val gesturesEnabledKey = booleanPreferencesKey("gestures_enabled")
     private val aiVoiceGuidanceKey = booleanPreferencesKey("ai_voice_guidance")
+    private val recommendationsEnabledKey = booleanPreferencesKey("recommendations_enabled")
+    private val quietHoursEnabledKey = booleanPreferencesKey("quiet_hours_enabled")
+    private val quietHoursStartKey = intPreferencesKey("quiet_hours_start")
+    private val quietHoursEndKey = intPreferencesKey("quiet_hours_end")
 
     val darkMode: Flow<Boolean> = context.settingsStore.data.map { preferences ->
         preferences[darkModeKey] ?: true
@@ -115,6 +119,22 @@ class SettingsRepository @Inject constructor(
         preferences[aiVoiceGuidanceKey] ?: false
     }
 
+    val recommendationsEnabled: Flow<Boolean> = context.settingsStore.data.map { preferences ->
+        preferences[recommendationsEnabledKey] ?: true
+    }
+
+    val quietHoursEnabled: Flow<Boolean> = context.settingsStore.data.map { preferences ->
+        preferences[quietHoursEnabledKey] ?: true
+    }
+
+    val quietHoursStart: Flow<Int> = context.settingsStore.data.map { preferences ->
+        preferences[quietHoursStartKey] ?: 22
+    }
+
+    val quietHoursEnd: Flow<Int> = context.settingsStore.data.map { preferences ->
+        preferences[quietHoursEndKey] ?: 8
+    }
+
     suspend fun setDarkMode(enabled: Boolean) {
         context.settingsStore.edit { it[darkModeKey] = enabled }
     }
@@ -189,6 +209,22 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setAiVoiceGuidance(enabled: Boolean) {
         context.settingsStore.edit { it[aiVoiceGuidanceKey] = enabled }
+    }
+
+    suspend fun setRecommendationsEnabled(enabled: Boolean) {
+        context.settingsStore.edit { it[recommendationsEnabledKey] = enabled }
+    }
+
+    suspend fun setQuietHoursEnabled(enabled: Boolean) {
+        context.settingsStore.edit { it[quietHoursEnabledKey] = enabled }
+    }
+
+    suspend fun setQuietHoursStart(hour: Int) {
+        context.settingsStore.edit { it[quietHoursStartKey] = hour }
+    }
+
+    suspend fun setQuietHoursEnd(hour: Int) {
+        context.settingsStore.edit { it[quietHoursEndKey] = hour }
     }
 }
 

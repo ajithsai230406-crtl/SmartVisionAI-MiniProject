@@ -11,3 +11,10 @@ local.properties
 
 # API Keys — never commit these
 app/google-services.json
+
+# Logcat dumps
+fresh_logcat*.txt
+logcat_output.txt
+
+# Design assets
+homescreen_mockup.svg

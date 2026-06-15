@@ -7,25 +7,31 @@ import android.net.Uri
 import android.speech.tts.TextToSpeech
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.smartvision.ai.data.repository.FirebaseRepository
 import com.smartvision.ai.data.repository.HistoryRepository
+import com.smartvision.ai.detector.data.MlKitObjectDetectionRepository
 import com.smartvision.ai.detector.data.ObjectDetectionRepository
 import com.smartvision.ai.detector.domain.*
-import com.google.ai.client.generativeai.GenerativeModel
-import com.google.ai.client.generativeai.type.content
+import com.smartvision.ai.data.repository.OpenRouterManager
 import org.json.JSONObject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Locale
 import javax.inject.Inject
 
 @HiltViewModel
 class ObjectDetectorViewModel @Inject constructor(
-    private val detectionRepo: ObjectDetectionRepository,
-    private val historyRepo:   HistoryRepository,
+    private val detectionRepo:   ObjectDetectionRepository,
+    private val mlKitRepo:       MlKitObjectDetectionRepository,
+    private val historyRepo:     HistoryRepository,
+    private val firebase:        FirebaseRepository,
+    private val openRouterManager: OpenRouterManager,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -70,65 +76,79 @@ class ObjectDetectorViewModel @Inject constructor(
         startFpsCounter()
     }
 
+    private fun getCenterDistance(box1: DetectionBox, box2: DetectionBox): Float {
+        val cx1 = (box1.left + box1.right) / 2f
+        val cy1 = (box1.top + box1.bottom) / 2f
+        val cx2 = (box2.left + box2.right) / 2f
+        val cy2 = (box2.top + box2.bottom) / 2f
+        val dx = cx1 - cx2
+        val dy = cy1 - cy2
+        return kotlin.math.sqrt(dx * dx + dy * dy)
+    }
+
     // ── Live frame analysis (called every camera frame) ───────────────────────
-    suspend fun analyzeFrame(image: Image, rotation: Int, width: Int, height: Int) {
-        if (!_isLive.value) return
+    suspend fun analyzeFrame(bitmap: Bitmap) = withContext(Dispatchers.Default) {
+        if (!_isLive.value) return@withContext
         val t0 = System.currentTimeMillis()
-        detectionRepo.detectFromImage(image, rotation)
-            .onSuccess { items ->
-                updateFps(t0)
-                val frameW = if (rotation == 90 || rotation == 270) height else width
-                val frameH = if (rotation == 90 || rotation == 270) width else height
-                if (items.isEmpty()) {
-                    _detectionState.value = DetectionState.NoObjects
-                } else {
-                    _detectionState.value = DetectionState.Active(
-                        items,
-                        System.currentTimeMillis() - t0,
-                        frameW,
-                        frameH
-                    )
-                    // Auto-select first item if none selected
-                    if (_selectedItem.value == null) selectItem(items.first())
+
+        // Use custom TFLite object detector
+        val items = detectionRepo.detectFromBitmap(bitmap).getOrDefault(emptyList())
+
+        updateFps(t0)
+        if (items.isEmpty()) {
+            _detectionState.value = DetectionState.NoObjects
+        } else {
+            val inferenceTime = System.currentTimeMillis() - t0
+            _detectionState.value = DetectionState.Active(
+                items,
+                inferenceTime,
+                bitmap.width,
+                bitmap.height
+            )
+
+            // Track and update the selected item with latest model outputs instantly
+            val currentSelected = _selectedItem.value
+            if (currentSelected != null) {
+                val matchingItem = items
+                    .filter { it.label == currentSelected.label }
+                    .minByOrNull { getCenterDistance(it.box, currentSelected.box) }
+                if (matchingItem != null) {
+                    _selectedItem.value = matchingItem
                 }
+            } else {
+                // Auto-select first item if none selected
+                selectItem(items.first())
             }
-            .onFailure {
-                _detectionState.value = DetectionState.Error(it.message ?: "Detection failed")
-            }
+        }
     }
 
     /** Detect from gallery URI */
     fun analyzeFromUri(context: Context, uri: Uri) = viewModelScope.launch {
         _isLive.value         = false
         _detectionState.value = DetectionState.Scanning
-        detectionRepo.detectFromUri(context, uri)
+
+        var galleryBitmap: Bitmap? = null
+        try {
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                galleryBitmap = android.graphics.BitmapFactory.decodeStream(stream)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        val bitmap = galleryBitmap
+        if (bitmap == null) {
+            _detectionState.value = DetectionState.Error("Failed to load image from gallery")
+            return@launch
+        }
+
+        mlKitRepo.detectFromBitmap(bitmap)
             .onSuccess { items ->
                 if (items.isEmpty()) {
                     _detectionState.value = DetectionState.NoObjects
                 } else {
-                    var w = 1080
-                    var h = 1920
-                    try {
-                        val options = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                        context.contentResolver.openInputStream(uri)?.use { stream ->
-                            android.graphics.BitmapFactory.decodeStream(stream, null, options)
-                        }
-                        if (options.outWidth > 0) w = options.outWidth
-                        if (options.outHeight > 0) h = options.outHeight
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-                    _detectionState.value = DetectionState.Active(items, 0L, w, h)
-                    
-                    var galleryBitmap: Bitmap? = null
-                    try {
-                        context.contentResolver.openInputStream(uri)?.use { stream ->
-                            galleryBitmap = android.graphics.BitmapFactory.decodeStream(stream)
-                        }
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-                    selectItem(items.first(), galleryBitmap)
+                    _detectionState.value = DetectionState.Active(items, 0L, bitmap.width, bitmap.height)
+                    selectItem(items.first(), bitmap)
                     addToSessionHistory(items)
                 }
             }
@@ -179,19 +199,16 @@ class ObjectDetectorViewModel @Inject constructor(
                     }
                 """.trimIndent()
 
-                val model = GenerativeModel(
-                    modelName = "gemini-1.5-flash",
-                    apiKey = com.smartvision.ai.BuildConfig.GEMINI_API_KEY
-                )
+                val jsonText = try {
+                    openRouterManager.generateContent(
+                        prompt = prompt,
+                        image = cropped,
+                        modelName = "openrouter/auto"
+                    )
+                } catch (e: Exception) {
+                    null
+                }
 
-                val response = model.generateContent(
-                    content {
-                        image(cropped)
-                        text(prompt)
-                    }
-                )
-
-                val jsonText = response.text
                 if (jsonText != null) {
                     val cleanJson = jsonText.substringAfter("{").substringBeforeLast("}")
                     val fullJson = "{$cleanJson}"
@@ -294,12 +311,20 @@ class ObjectDetectorViewModel @Inject constructor(
         val text = "${item.label}. ${know.description}"
         tts?.language = Locale.ENGLISH
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
-        // Save to history
         viewModelScope.launch {
+            // Generic history entry (for in-app History tab)
             historyRepo.save(
                 "Object",
                 "${item.label} detected (${(item.confidence * 100).toInt()}%)",
                 know.description.take(220)
+            )
+            // Structured Firebase entry with rich object detection data
+            firebase.saveObjectDetection(
+                objectName  = item.label,
+                confidence  = item.confidence,
+                category    = item.category.name,
+                description = know.description,
+                uses        = know.uses.joinToString(", ")
             )
         }
     }
@@ -338,6 +363,10 @@ class ObjectDetectorViewModel @Inject constructor(
                 // fps updated inside updateFps()
             }
         }
+    }
+
+    fun stopSpeaking() {
+        tts?.stop()
     }
 
     override fun onCleared() {

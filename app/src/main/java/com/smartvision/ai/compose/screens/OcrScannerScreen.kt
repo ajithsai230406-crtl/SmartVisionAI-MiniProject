@@ -53,7 +53,7 @@ fun OcrScannerScreen(
                     modifier         = Modifier.fillMaxSize(),
                     onCameraReady    = { cameraRef.value = it },
                     onTextRecognized = { text ->
-                        scope.launch {
+                        scope.launch(kotlinx.coroutines.Dispatchers.Default) {
                             val result = viewModel.recognize(text, 0)
                             extractedText = result
                         }
@@ -138,6 +138,20 @@ private fun CameraPreview(
     val lifecycleOwner = LocalLifecycleOwner.current
     val executor      = remember { Executors.newSingleThreadExecutor() }
     val processing    = remember { AtomicBoolean(false) }
+
+    DisposableEffect(lifecycleOwner) {
+        onDispose {
+            executor.shutdown()
+            val future = ProcessCameraProvider.getInstance(context)
+            future.addListener({
+                try {
+                    future.get().unbindAll()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }, ContextCompat.getMainExecutor(context))
+        }
+    }
 
     AndroidView(
         factory = { ctx ->

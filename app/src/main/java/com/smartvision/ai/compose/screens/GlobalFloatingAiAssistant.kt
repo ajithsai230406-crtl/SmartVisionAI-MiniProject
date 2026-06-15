@@ -73,6 +73,8 @@ fun GlobalFloatingAiAssistant(
     val micPermission = rememberPermissionState(Manifest.permission.RECORD_AUDIO)
 
     val messages by viewModel.messages.collectAsStateWithLifecycle()
+    val isLastPage by viewModel.isLastPage.collectAsStateWithLifecycle()
+    val isLoadingHistory by viewModel.isLoadingHistory.collectAsStateWithLifecycle()
     var isExpanded by remember { mutableStateOf(false) }
     var input by remember { mutableStateOf("") }
     val chatListState = rememberLazyListState()
@@ -84,9 +86,22 @@ fun GlobalFloatingAiAssistant(
     var isListening by remember { mutableStateOf(false) }
     var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
 
-    val lastMessageText = remember { derivedStateOf { messages.lastOrNull()?.text ?: "" } }
-    LaunchedEffect(messages.size, lastMessageText.value) {
-        if (messages.isNotEmpty() && isExpanded) {
+    DisposableEffect(speechRecognizer) {
+        onDispose {
+            speechRecognizer?.destroy()
+        }
+    }
+
+    LaunchedEffect(isExpanded) {
+        if (!isExpanded && isListening) {
+            speechRecognizer?.stopListening()
+            isListening = false
+        }
+    }
+
+    val lastMessage = messages.lastOrNull()
+    LaunchedEffect(lastMessage?.timestamp, lastMessage?.text) {
+        if (messages.isNotEmpty() && isExpanded && (lastMessage?.fromUser == true || viewModel.isStreaming || viewModel.isLoading)) {
             chatListState.animateScrollToItem(messages.lastIndex)
         }
     }
@@ -431,6 +446,32 @@ fun GlobalFloatingAiAssistant(
                             )
                         }
                     } else {
+                        if (!isLastPage) {
+                            item {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (isLoadingHistory) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(24.dp),
+                                            color = NeonPurple,
+                                            strokeWidth = 2.dp
+                                        )
+                                    } else {
+                                        TextButton(
+                                            onClick = { viewModel.loadNextPage() },
+                                            colors = ButtonDefaults.textButtonColors(contentColor = NeonCyan)
+                                        ) {
+                                            Text("Load Earlier Messages", style = MaterialTheme.typography.labelLarge)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         items(messages) { msg ->
                             AssistantChatBubble(
                                 text = msg.text,
@@ -454,6 +495,10 @@ fun GlobalFloatingAiAssistant(
                     hasMicPermission = micPermission.status.isGranted,
                     onVoiceToggle = {
                         if (micPermission.status.isGranted) {
+                            if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+                                android.widget.Toast.makeText(context, "Speech recognition is not available on this device", android.widget.Toast.LENGTH_SHORT).show()
+                                return@InputVoiceRowItem
+                            }
                             if (isListening) {
                                 speechRecognizer?.stopListening()
                                 isListening = false
