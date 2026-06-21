@@ -98,27 +98,51 @@ class SmartTranslatorRepository @Inject constructor(
                     targetLang      = targetLang,
                     pronunciation   = semanticMeaning?.pronunciation,
                     nativeMeaning   = semanticMeaning?.meaningOriginal,
+                    meaningInTarget = semanticMeaning?.meaningInTarget,
                     semanticMeaning = semanticMeaning,
                     isOfflineMode   = !isOnline
                 )
             }
 
             val translated = try {
-                val options    = TranslatorOptions.Builder().setSourceLanguage(srcMlKit).setTargetLanguage(tgtMlKit).build()
-                val translator = Translation.getClient(options)
-                
-                // Wrap model downloading and translation in retries
-                val res = retryWithDelay(retries = 3) {
-                    translator.downloadModelIfNeeded().await()
-                    translator.translate(text).await()
-                }
-                translator.close()
-                res
-            } catch (e: Exception) {
                 if (networkMonitor.isOnline()) {
-                    val prompt = "Translate the following text from ${detectedLang.displayName} to ${targetLang.displayName}. Return ONLY the translated text, nothing else.\nText:\n$text"
-                    val responseText = openRouterManager.generateContent(prompt, modelName = "openrouter/auto")
-                    responseText.trim()
+                    val prompt = """
+                        You are a linguistic expert and professional translator.
+                        Translate the following text from ${detectedLang.displayName} to ${targetLang.displayName}.
+                        Identify the tone, intent, and grammar of the speaker, and translate it into a natural, grammatically correct phrasing in ${targetLang.displayName}.
+                        If the original sentence is grammatically incorrect or colloquial, understand its meaning and output a correct, natural sentence in ${targetLang.displayName} while keeping the tone.
+                        Return ONLY the translated text, with no extra commentary, backticks, explanations, or notes.
+
+                        Text:
+                        $text
+                    """.trimIndent()
+                    openRouterManager.generateContent(prompt, modelName = "openrouter/auto").trim()
+                } else {
+                    // Offline translation using ML Kit local models
+                    val options    = TranslatorOptions.Builder().setSourceLanguage(srcMlKit).setTargetLanguage(tgtMlKit).build()
+                    val translator = Translation.getClient(options)
+                    val res = retryWithDelay(retries = 3) {
+                        translator.downloadModelIfNeeded().await()
+                        translator.translate(text).await()
+                    }
+                    translator.close()
+                    res
+                }
+            } catch (e: Exception) {
+                // Fallback: If online fails, try local ML Kit translation
+                if (networkMonitor.isOnline()) {
+                    try {
+                        val options    = TranslatorOptions.Builder().setSourceLanguage(srcMlKit).setTargetLanguage(tgtMlKit).build()
+                        val translator = Translation.getClient(options)
+                        val res = retryWithDelay(retries = 3) {
+                            translator.downloadModelIfNeeded().await()
+                            translator.translate(text).await()
+                        }
+                        translator.close()
+                        res
+                    } catch (inner: Exception) {
+                        throw e
+                    }
                 } else {
                     throw e
                 }
@@ -137,6 +161,7 @@ class SmartTranslatorRepository @Inject constructor(
                 targetLang      = targetLang,
                 pronunciation   = semanticMeaning?.pronunciation,
                 nativeMeaning   = semanticMeaning?.meaningOriginal,
+                meaningInTarget = semanticMeaning?.meaningInTarget,
                 semanticMeaning = semanticMeaning,
                 isOfflineMode   = !isOnline
             )
@@ -180,7 +205,7 @@ class SmartTranslatorRepository @Inject constructor(
                 cacheDao.insertCache(GeminiCacheEntity(promptHash, prompt, responseText))
                 meaning
             }.getOrElse {
-                getFallbackMeaning(original, srcLang)
+                getFallbackMeaning(original, srcLang, tgtLang)
             }
         } else {
             // OFFLINE MODE: Local Semantic Engine
@@ -209,7 +234,7 @@ class SmartTranslatorRepository @Inject constructor(
                 )
             } else {
                 // 2. Phrase unavailable: run Local Heuristics NLP Engine!
-                getFallbackMeaning(original, srcLang)
+                getFallbackMeaning(original, srcLang, tgtLang)
             }
         }
     }
@@ -225,7 +250,8 @@ You are a linguistic expert. Provide a concise, semantic explanation of the phra
 Return ONLY a valid JSON object (no markdown, no backticks, no comments). The JSON structure MUST be exactly:
 {
   "meaningEnglish": "Concise semantic meaning of '$original' written strictly in English.",
-  "meaningOriginal": "Concise semantic meaning of '$original' written strictly in the original language: ${srcLang.displayName} (${srcLang.nativeName}). Do not include any English or translate it.",
+  "meaningOriginal": "Concise semantic meaning of '$original' written strictly in its original language: ${srcLang.displayName} (${srcLang.nativeName}). Do not include any English.",
+  "meaningInTarget": "Concise semantic meaning of '$original' written strictly in the TARGET language: ${tgtLang.displayName} (${tgtLang.nativeName}). Do not include any English or ${srcLang.displayName}.",
   "contextExplanation": "Contextual, cultural background or nuances of '$original'. Keep it brief.",
   "usageExplanation": "Explanation of how/when to use it, followed by 1 short usage example.",
   "pronunciation": "Romanized pronunciation / transliteration of the original text '$original' (or null if the language uses standard Latin script)."
@@ -242,10 +268,12 @@ Return ONLY a valid JSON object (no markdown, no backticks, no comments). The JS
         val json = JSONObject(cleaned)
         
         val meaningOriginal = json.optString("meaningOriginal", "").takeIf { it.isNotBlank() } ?: "Meaning not available."
+        val meaningInTarget = json.optString("meaningInTarget", "").takeIf { it.isNotBlank() && it != "null" }
         
         return SemanticMeaning(
             meaningEnglish     = json.optString("meaningEnglish", "Meaning not available."),
             meaningOriginal    = meaningOriginal,
+            meaningInTarget    = meaningInTarget,
             contextExplanation = json.optString("contextExplanation", "Context not available."),
             usageExplanation   = json.optString("usageExplanation", "Usage instructions not available."),
             pronunciation      = json.optString("pronunciation", "").takeIf { it.isNotBlank() && it != "null" },
@@ -278,7 +306,7 @@ Return ONLY a valid JSON object (no markdown, no backticks, no comments). The JS
         }
     }
 
-    private suspend fun getFallbackMeaning(original: String, srcLang: Language): SemanticMeaning {
+    private suspend fun getFallbackMeaning(original: String, srcLang: Language, tgtLang: Language): SemanticMeaning {
         val category = detectCategory(original)
         
         val meaningEnglish = when (category) {
@@ -317,7 +345,7 @@ Return ONLY a valid JSON object (no markdown, no backticks, no comments). The JS
             matched?.pronunciation ?: "Pronunciation guide active in offline mode"
         } else null
 
-        // Translate the English fallback explanation into detected source language offline
+        // Translate the English fallback explanation into target language offline
         val meaningOriginal = if (srcLang.code == "en") {
             meaningEnglish
         } else {

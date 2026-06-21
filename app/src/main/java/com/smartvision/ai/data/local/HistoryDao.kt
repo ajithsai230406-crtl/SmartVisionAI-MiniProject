@@ -34,5 +34,8 @@ interface HistoryDao {
 
     @Query("DELETE FROM history_records WHERE type IN ('ChatUser', 'ChatBot') AND userId = :userId")
     suspend fun clearChatHistory(userId: String)
+
+    @Query("SELECT * FROM history_records WHERE id = :id LIMIT 1")
+    suspend fun getById(id: Long): HistoryEntity?
 }
 

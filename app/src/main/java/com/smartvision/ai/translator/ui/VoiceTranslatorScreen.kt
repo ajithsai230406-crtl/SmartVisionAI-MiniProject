@@ -1,6 +1,10 @@
 package com.smartvision.ai.translator.ui
 
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -14,6 +18,7 @@ import androidx.compose.ui.draw.*
 import androidx.compose.ui.geometry.*
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.*
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -47,7 +52,11 @@ fun VoiceTranslatorScreen(
     val partialText  by viewModel.partialText.collectAsStateWithLifecycle()
     val conversation by viewModel.conversation.collectAsStateWithLifecycle()
     val error        by viewModel.error.collectAsStateWithLifecycle()
+    val autoPlay     by viewModel.autoPlay.collectAsStateWithLifecycle()
+    val continuousMode by viewModel.continuousMode.collectAsStateWithLifecycle()
+    val recordingDuration by viewModel.recordingDuration.collectAsStateWithLifecycle()
     var showLangPicker by remember { mutableStateOf<Boolean?>(null) }   // true=left, false=right
+    val ctx          = LocalContext.current
 
     LaunchedEffect(Unit) { if (!micPerm.status.isGranted) micPerm.launchPermissionRequest() }
 
@@ -62,12 +71,16 @@ fun VoiceTranslatorScreen(
 
             Column(modifier = Modifier.fillMaxSize()) {
 
-                // ── Top bar ───────────────────────────────────────────────────
+                // ── Top bar ──────────────────────────────────────────────
                 VoiceTopBar(
-                    onBack       = onBack,
-                    onClear      = { viewModel.clearConversation() },
-                    onSwap       = { viewModel.swapLanguages() },
-                    hasConversation = conversation.isNotEmpty()
+                    onBack          = onBack,
+                    onClear         = { viewModel.clearConversation() },
+                    onSwap          = { viewModel.swapLanguages() },
+                    onToggleAutoPlay   = { viewModel.toggleAutoPlay() },
+                    onToggleContinuous = { viewModel.toggleContinuousMode() },
+                    hasConversation = conversation.isNotEmpty(),
+                    autoPlay        = autoPlay,
+                    continuousMode  = continuousMode
                 )
 
                 // ── Language header ────────────────────────────────────────────
@@ -91,21 +104,76 @@ fun VoiceTranslatorScreen(
                         }
                     } else {
                         ConversationThread(
-                            entries      = conversation,
-                            partialText  = partialText,
+                            entries       = conversation,
+                            partialText   = partialText,
                             activeChannel = activeChannel,
-                            onSpeakEntry = { viewModel.speakEntry(it) }
+                            onSpeakEntry  = { viewModel.speakEntry(it) },
+                            onSpeakOriginalEntry = { viewModel.speakOriginalEntry(it) },
+                            onCopyEntry   = { text ->
+                                val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                cm.setPrimaryClip(ClipData.newPlainText("Voice Translation", text))
+                            },
+                            onShareEntry  = { text ->
+                                val intent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"; putExtra(Intent.EXTRA_TEXT, text)
+                                }.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                runCatching { ctx.startActivity(Intent.createChooser(intent, "Share").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                            }
                         )
                     }
                 }
 
-                // ── Waveform visualizer ────────────────────────────────────────
-                AnimatedVisibility(visible = listenState == VoiceListeningState.LISTENING) {
-                    VoiceWaveformBar(
-                        amplitudes    = waveAmps,
-                        activeChannel = activeChannel,
-                        modifier      = Modifier.fillMaxWidth().height(80.dp).padding(horizontal = 16.dp)
-                    )
+                // ── Waveform visualizer & Timer ────────────────────────────────────────
+                AnimatedVisibility(visible = listenState != VoiceListeningState.IDLE) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            val infiniteTransition = rememberInfiniteTransition(label = "rec")
+                            val alpha by infiniteTransition.animateFloat(
+                                initialValue = 0.3f,
+                                targetValue = 1f,
+                                animationSpec = infiniteRepeatable(
+                                    animation = tween(800, easing = LinearEasing),
+                                    repeatMode = RepeatMode.Reverse
+                                ),
+                                label = "recAlpha"
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(NeonPink.copy(alpha = alpha))
+                            )
+                            Text(
+                                text = "REC",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = NeonPink,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(Modifier.width(8.dp))
+
+                            val minutes = recordingDuration / 60
+                            val seconds = recordingDuration % 60
+                            Text(
+                                text = String.format("%02d:%02d", minutes, seconds),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = NeonBlue,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        VoiceWaveformBar(
+                            amplitudes    = waveAmps,
+                            activeChannel = activeChannel,
+                            modifier      = Modifier.fillMaxWidth().height(80.dp)
+                        )
+                    }
                 }
 
                 // ── Dual mic buttons ───────────────────────────────────────────
@@ -162,7 +230,16 @@ fun VoiceTranslatorScreen(
 // ══════════════════════════════════════════════════════════════════════════════
 
 @Composable
-private fun VoiceTopBar(onBack: () -> Unit, onClear: () -> Unit, onSwap: () -> Unit, hasConversation: Boolean) {
+private fun VoiceTopBar(
+    onBack: () -> Unit,
+    onClear: () -> Unit,
+    onSwap: () -> Unit,
+    onToggleAutoPlay: () -> Unit,
+    onToggleContinuous: () -> Unit,
+    hasConversation: Boolean,
+    autoPlay: Boolean,
+    continuousMode: Boolean
+) {
     val ext = MaterialTheme.extended
     Row(
         modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 10.dp),
@@ -174,15 +251,31 @@ private fun VoiceTopBar(onBack: () -> Unit, onClear: () -> Unit, onSwap: () -> U
             }
             Column {
                 Text("🎙️ Voice Translator", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold)
-                Text("Conversation Mode · Auto-play", style = MaterialTheme.typography.labelSmall, color = NeonBlue)
+                Text("Conversation Mode", style = MaterialTheme.typography.labelSmall, color = NeonBlue)
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Box(Modifier.clip(RoundedCornerShape(8.dp)).background(ext.glassCard).border(1.dp, ext.glassBorder, RoundedCornerShape(8.dp)).clickable(onClick = onSwap).padding(horizontal = 10.dp, vertical = 6.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            // Auto-play toggle
+            Box(
+                Modifier.clip(RoundedCornerShape(8.dp))
+                    .then(if (autoPlay) Modifier.background(NeonBlue.copy(0.15f)).border(1.dp, NeonBlue.copy(0.4f), RoundedCornerShape(8.dp)) else Modifier.background(ext.glassCard).border(1.dp, ext.glassBorder, RoundedCornerShape(8.dp)))
+                    .clickable(onClick = onToggleAutoPlay)
+                    .padding(horizontal = 8.dp, vertical = 5.dp)
+            ) { Text("🔊 Auto", style = MaterialTheme.typography.labelSmall, color = if (autoPlay) NeonBlue else MaterialTheme.colorScheme.onSurfaceVariant) }
+
+            // Continuous mode toggle
+            Box(
+                Modifier.clip(RoundedCornerShape(8.dp))
+                    .then(if (continuousMode) Modifier.background(NeonPurple.copy(0.15f)).border(1.dp, NeonPurple.copy(0.4f), RoundedCornerShape(8.dp)) else Modifier.background(ext.glassCard).border(1.dp, ext.glassBorder, RoundedCornerShape(8.dp)))
+                    .clickable(onClick = onToggleContinuous)
+                    .padding(horizontal = 8.dp, vertical = 5.dp)
+            ) { Text("🔁 Loop", style = MaterialTheme.typography.labelSmall, color = if (continuousMode) NeonPurple else MaterialTheme.colorScheme.onSurfaceVariant) }
+
+            Box(Modifier.clip(RoundedCornerShape(8.dp)).background(ext.glassCard).border(1.dp, ext.glassBorder, RoundedCornerShape(8.dp)).clickable(onClick = onSwap).padding(horizontal = 8.dp, vertical = 5.dp)) {
                 Text("⇄ Swap", style = MaterialTheme.typography.labelSmall, color = NeonBlue)
             }
             if (hasConversation) {
-                Box(Modifier.clip(RoundedCornerShape(8.dp)).background(NeonPink.copy(0.1f)).border(1.dp, NeonPink.copy(0.3f), RoundedCornerShape(8.dp)).clickable(onClick = onClear).padding(horizontal = 10.dp, vertical = 6.dp)) {
+                Box(Modifier.clip(RoundedCornerShape(8.dp)).background(NeonPink.copy(0.1f)).border(1.dp, NeonPink.copy(0.3f), RoundedCornerShape(8.dp)).clickable(onClick = onClear).padding(horizontal = 8.dp, vertical = 5.dp)) {
                     Text("Clear", style = MaterialTheme.typography.labelSmall, color = NeonPink)
                 }
             }
@@ -242,10 +335,13 @@ private fun VoiceLanguageHeader(
 
 @Composable
 private fun ConversationThread(
-    entries:       List<ConversationEntry>,
-    partialText:   String,
+    entries:      List<ConversationEntry>,
+    partialText:  String,
     activeChannel: Boolean?,
-    onSpeakEntry:  (ConversationEntry) -> Unit
+    onSpeakEntry: (ConversationEntry) -> Unit,
+    onSpeakOriginalEntry: (ConversationEntry) -> Unit,
+    onCopyEntry:  (String) -> Unit,
+    onShareEntry: (String) -> Unit
 ) {
     val listState = rememberLazyListState()
     LaunchedEffect(entries.size) { if (entries.isNotEmpty()) listState.animateScrollToItem(entries.lastIndex) }
@@ -257,7 +353,13 @@ private fun ConversationThread(
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         items(entries, key = { it.id }) { entry ->
-            ConversationBubble(entry = entry, onSpeak = { onSpeakEntry(entry) })
+            ConversationBubble(
+                entry = entry,
+                onSpeak = { onSpeakEntry(entry) },
+                onSpeakOriginal = { onSpeakOriginalEntry(entry) },
+                onCopy  = { onCopyEntry(entry.translatedText) },
+                onShare = { onShareEntry(entry.translatedText) }
+            )
         }
 
         // Partial recognition text
@@ -289,7 +391,13 @@ private fun ConversationThread(
 }
 
 @Composable
-private fun ConversationBubble(entry: ConversationEntry, onSpeak: () -> Unit) {
+private fun ConversationBubble(
+    entry: ConversationEntry,
+    onSpeak: () -> Unit,
+    onSpeakOriginal: () -> Unit,
+    onCopy:  () -> Unit,
+    onShare: () -> Unit
+) {
     val isLeft  = entry.isUserSide
     val color   = if (isLeft) NeonBlue else NeonPurple
     val ext     = MaterialTheme.extended
@@ -307,7 +415,7 @@ private fun ConversationBubble(entry: ConversationEntry, onSpeak: () -> Unit) {
         )
 
         Box(
-            modifier = Modifier.widthIn(max = 280.dp)
+            modifier = Modifier.widthIn(max = 300.dp)
                 .clip(
                     RoundedCornerShape(
                         topStart = if (isLeft) 4.dp else 18.dp,
@@ -319,18 +427,24 @@ private fun ConversationBubble(entry: ConversationEntry, onSpeak: () -> Unit) {
                 .border(1.dp, color.copy(0.35f), RoundedCornerShape(topStart = if (isLeft) 4.dp else 18.dp, topEnd = if (isLeft) 18.dp else 4.dp, bottomStart = 18.dp, bottomEnd = 18.dp))
         ) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                // Original
-                Text(entry.originalText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                HorizontalDivider(color = color.copy(0.15f))
-                // Translation
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Top) {
-                    Text(entry.translatedText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f), lineHeight = 20.sp)
-                    Box(Modifier.size(24.dp).clip(CircleShape).background(color.copy(0.12f)).clickable(onClick = onSpeak), Alignment.Center) {
-                        Text("🔊", fontSize = 11.sp)
+                // Original with source TTS
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(entry.originalText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Box(Modifier.size(22.dp).clip(CircleShape).background(color.copy(0.10f)).clickable(onClick = onSpeakOriginal), Alignment.Center) {
+                        Text("🔊", fontSize = 10.sp)
                     }
                 }
+                HorizontalDivider(color = color.copy(0.15f))
 
-                // Premium AI Semantic Breakdown inside Voice bubble
+                // Translation row with TTS + Copy + Share
+                Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.Top) {
+                    Text(entry.translatedText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f), lineHeight = 20.sp)
+                    Box(Modifier.size(22.dp).clip(CircleShape).background(color.copy(0.12f)).clickable(onClick = onSpeak), Alignment.Center) { Text("🔊", fontSize = 10.sp) }
+                    Box(Modifier.size(22.dp).clip(CircleShape).background(ext.glassCard).border(1.dp, ext.glassBorder, CircleShape).clickable(onClick = onCopy), Alignment.Center) { Text("📋", fontSize = 10.sp) }
+                    Box(Modifier.size(22.dp).clip(CircleShape).background(ext.glassCard).border(1.dp, ext.glassBorder, CircleShape).clickable(onClick = onShare), Alignment.Center) { Text("↑", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface) }
+                }
+
+                // AI Semantic Breakdown
                 entry.semanticMeaning?.let { meaning ->
                     val isOffline = meaning.isOfflineMode
                     HorizontalDivider(color = if (isOffline) Color(0xFF4CAF50).copy(0.2f) else color.copy(0.12f))
@@ -344,23 +458,23 @@ private fun ConversationBubble(entry: ConversationEntry, onSpeak: () -> Unit) {
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold
                             )
-                            if (isOffline) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(6.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFF4CAF50))
-                                )
-                            }
+                            if (isOffline) Box(Modifier.size(6.dp).clip(CircleShape).background(Color(0xFF4CAF50)))
                         }
-                        
+
                         // English meaning
                         Text("🇺🇸 English:", style = MaterialTheme.typography.labelSmall, color = color.copy(0.8f), fontSize = 9.sp, fontWeight = FontWeight.Bold)
                         Text(meaning.meaningEnglish, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface, fontSize = 10.5.sp, lineHeight = 14.sp)
-                        
-                        // Native meaning
+
+                        // Source language meaning
                         Text("💡 ${entry.sourceLang.displayName}:", style = MaterialTheme.typography.labelSmall, color = color.copy(0.8f), fontSize = 9.sp, fontWeight = FontWeight.Bold)
                         Text(meaning.meaningOriginal, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(0.9f), fontSize = 10.5.sp, lineHeight = 14.sp)
+
+                        // Target language meaning (new!)
+                        val targetMeaning = entry.meaningInTarget ?: meaning.meaningInTarget
+                        if (!targetMeaning.isNullOrBlank()) {
+                            Text("🎯 ${entry.targetLang.displayName}:", style = MaterialTheme.typography.labelSmall, color = NeonCyan.copy(0.9f), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            Text(targetMeaning, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(0.9f), fontSize = 10.5.sp, lineHeight = 14.sp)
+                        }
 
                         // Context
                         Text("🎭 Context & Nuance:", style = MaterialTheme.typography.labelSmall, color = color.copy(0.8f), fontSize = 9.sp, fontWeight = FontWeight.Bold)
@@ -383,17 +497,14 @@ private fun ConversationBubble(entry: ConversationEntry, onSpeak: () -> Unit) {
                             Text(
                                 "Meaning in ${entry.sourceLang.displayName}:",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = color,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold
+                                color = color, fontSize = 10.sp, fontWeight = FontWeight.Bold
                             )
                         }
                         Text(
                             text = meaning,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
-                            lineHeight = 16.sp,
-                            fontSize = 11.sp
+                            lineHeight = 16.sp, fontSize = 11.sp
                         )
                     }
                 }
@@ -502,14 +613,24 @@ private fun MicButton(lang: Language, color: Color, isActive: Boolean, isProcess
                     else
                         Modifier.background(MaterialTheme.extended.glassCard)
                 )
-                .border(2.dp, color.copy(if (isActive) 1f else 0.4f), CircleShape)
+                .then(
+                    if (isActive) {
+                        Modifier.border(
+                            width = 3.dp,
+                            brush = Brush.sweepGradient(listOf(color, NeonPurple, color)),
+                            shape = CircleShape
+                        )
+                    } else {
+                        Modifier.border(2.dp, color.copy(0.4f), CircleShape)
+                    }
+                )
                 .clickable(onClick = onClick),
             contentAlignment = Alignment.Center
         ) {
             if (isProcessing) {
                 CircularProgressIndicator(modifier = Modifier.size(28.dp), color = color, strokeWidth = 3.dp)
             } else {
-                Text(if (isActive) "🎙️" else "🎤", fontSize = 28.sp)
+                Text(if (isActive) "⏹" else "🎤", fontSize = 28.sp)
             }
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {

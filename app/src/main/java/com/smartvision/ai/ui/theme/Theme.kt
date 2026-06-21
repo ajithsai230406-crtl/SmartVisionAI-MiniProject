@@ -113,7 +113,8 @@ data class ExtendedColors(
     val glassBorder: Color,
     val cardBackground: Color,
     val textHint: Color,
-    val isDark: Boolean
+    val isDark: Boolean,
+    val themeMode: String
 )
 
 val LocalExtendedColors = staticCompositionLocalOf {
@@ -129,7 +130,8 @@ val LocalExtendedColors = staticCompositionLocalOf {
         glassBorder   = GlassBorder,
         cardBackground= NavyCard,
         textHint      = TextHint,
-        isDark        = true
+        isDark        = true,
+        themeMode     = "NEON_DARK"
     )
 }
 
@@ -140,10 +142,11 @@ val LocalVoiceGuidance = staticCompositionLocalOf { false }
 val LocalAiVoiceGuidance = staticCompositionLocalOf { false }
 
 fun getAdjustedColors(
-    darkTheme: Boolean,
+    themeMode: String,
     colorblindMode: String,
     highContrast: Boolean
 ): ExtendedColors {
+    val darkTheme = themeMode != "LIGHT"
     var blue   = if (darkTheme) NeonBlue      else LightNeonBlue
     var purple = if (darkTheme) NeonPurple    else LightNeonPurple
     var cyan   = if (darkTheme) NeonCyan      else LightNeonBlue
@@ -173,10 +176,26 @@ fun getAdjustedColors(
         }
     }
 
-    var glassCard = if (darkTheme) GlassCard else LightGlassCard
-    var glassBorder = if (darkTheme) GlassBorder else LightGlassBorder
-    var cardBackground = if (darkTheme) NavyCard else LightCard
-    var textHint = if (darkTheme) TextHint else LightTextHint
+    var glassCard = when (themeMode) {
+        "PURE_BLACK" -> Color(0xFF080808)
+        "LIGHT" -> LightGlassCard
+        else -> GlassCard
+    }
+    var glassBorder = when (themeMode) {
+        "PURE_BLACK" -> Color(0xFF1E1E1E)
+        "LIGHT" -> LightGlassBorder
+        else -> GlassBorder
+    }
+    var cardBackground = when (themeMode) {
+        "PURE_BLACK" -> Color(0xFF0C0C0C)
+        "LIGHT" -> LightCard
+        else -> NavyCard
+    }
+    var textHint = when (themeMode) {
+        "PURE_BLACK" -> Color(0xFF666666)
+        "LIGHT" -> LightTextHint
+        else -> TextHint
+    }
 
     if (highContrast) {
         glassCard = if (darkTheme) Color.Black else Color.White
@@ -204,7 +223,8 @@ fun getAdjustedColors(
         glassBorder = glassBorder,
         cardBackground = cardBackground,
         textHint = textHint,
-        isDark = darkTheme
+        isDark = darkTheme,
+        themeMode = themeMode
     )
 }
 
@@ -229,6 +249,7 @@ fun getScaledTypography(multiplier: Float): Typography {
 
 @Composable
 fun SmartVisionTheme(
+    themeMode: String? = null,
     darkTheme: Boolean = true,
     fontSizeMultiplier: Float = 1.0f,
     highContrast: Boolean = false,
@@ -238,9 +259,13 @@ fun SmartVisionTheme(
     aiVoiceGuidance: Boolean = false,
     content: @Composable () -> Unit
 ) {
-    val baseScheme = if (darkTheme) DarkColorScheme else LightColorScheme
+    val resolvedThemeMode = themeMode ?: if (darkTheme) "NEON_DARK" else "LIGHT"
+    currentAppTheme = resolvedThemeMode
+    val isResolvedDark = resolvedThemeMode != "LIGHT"
+
+    val baseScheme = if (isResolvedDark) DarkColorScheme else LightColorScheme
     val colorScheme = if (highContrast) {
-        if (darkTheme) {
+        if (isResolvedDark) {
             baseScheme.copy(
                 background = Color.Black,
                 surface = Color.Black,
@@ -265,16 +290,16 @@ fun SmartVisionTheme(
         baseScheme
     }
 
-    val extendedColors = getAdjustedColors(darkTheme, colorblindMode, highContrast)
+    val extendedColors = getAdjustedColors(resolvedThemeMode, colorblindMode, highContrast)
     val scaledTypography = getScaledTypography(1.0f) // Scale via LocalDensity instead of duplicate typography scaling
-
+ 
     // Status bar styling — transparent edge-to-edge
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
             window.statusBarColor = android.graphics.Color.TRANSPARENT
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !isResolvedDark
         }
     }
 

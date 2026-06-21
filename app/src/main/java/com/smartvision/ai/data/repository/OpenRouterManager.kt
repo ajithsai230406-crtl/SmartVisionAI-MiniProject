@@ -72,7 +72,12 @@ class OpenRouterManager @Inject constructor(
 
     private fun buildRequestBody(prompt: String, image: Bitmap?, modelName: String = "openrouter/auto", stream: Boolean = false): String {
         val json = JSONObject()
-        json.put("model", "openrouter/auto")
+        val targetModel = if (image != null && modelName == "openrouter/auto") {
+            "google/gemini-2.5-flash"
+        } else {
+            modelName
+        }
+        json.put("model", targetModel)
         if (stream) {
             json.put("stream", true)
         }
@@ -116,7 +121,11 @@ class OpenRouterManager @Inject constructor(
     ): String = withContext(Dispatchers.IO) {
         val startTime = System.currentTimeMillis()
         val hasImage = image != null
-        val targetModel = "openrouter/auto"
+        val targetModel = if (hasImage && modelName == "openrouter/auto") {
+            "google/gemini-2.5-flash"
+        } else {
+            modelName
+        }
         Log.i("OpenRouterManager", "[Request] Model: $targetModel | Prompt Length: ${prompt.length} | Has Image: $hasImage")
 
         if (!networkMonitor.isOnline()) {
@@ -125,7 +134,7 @@ class OpenRouterManager @Inject constructor(
         }
 
         val apiKey = getApiKey()
-        val requestBodyString = buildRequestBody(prompt, image, modelName, stream = false)
+        val requestBodyString = buildRequestBody(prompt, image, targetModel, stream = false)
         val json = JSONObject(requestBodyString)
         Log.d("OPENROUTER_MODEL", json.toString())
         val requestBody = requestBodyString.toRequestBody("application/json".toMediaType())
@@ -175,7 +184,7 @@ class OpenRouterManager @Inject constructor(
         modelName: String = "openrouter/auto"
     ): Flow<String> = flow {
         val startTime = System.currentTimeMillis()
-        val targetModel = "openrouter/auto"
+        val targetModel = modelName
         Log.i("OpenRouterManager", "[Stream Request] Model: $targetModel | Prompt Length: ${prompt.length}")
 
         if (!networkMonitor.isOnline()) {
@@ -184,7 +193,7 @@ class OpenRouterManager @Inject constructor(
         }
 
         val apiKey = getApiKey()
-        val requestBodyString = buildRequestBody(prompt, null, modelName, stream = true)
+        val requestBodyString = buildRequestBody(prompt, null, targetModel, stream = true)
         val json = JSONObject(requestBodyString)
         Log.d("OPENROUTER_MODEL", json.toString())
         val requestBody = requestBodyString.toRequestBody("application/json".toMediaType())

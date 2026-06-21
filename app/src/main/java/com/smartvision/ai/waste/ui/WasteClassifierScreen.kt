@@ -1,6 +1,9 @@
 package com.smartvision.ai.waste.ui
+
 import android.Manifest
+import android.graphics.Bitmap
 import android.view.ViewGroup
+import android.widget.Toast
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -17,28 +20,25 @@ import androidx.compose.ui.draw.*
 import androidx.compose.ui.geometry.*
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.*
-import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.accompanist.permissions.*
 import com.smartvision.ai.compose.components.*
+import com.smartvision.ai.ui.theme.*
 import com.smartvision.ai.waste.domain.*
 import com.smartvision.ai.waste.presentation.WasteClassifierViewModel
-import com.smartvision.ai.ui.theme.*
-import java.util.concurrent.Executors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import android.graphics.Bitmap
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.compose.ui.layout.ContentScale
-import android.widget.Toast
-
+import java.util.concurrent.Executors
 
 // ══════════════════════════════════════════════════════════════════════════════
 // WASTE CLASSIFIER — MAIN SCREEN
@@ -47,6 +47,205 @@ import android.widget.Toast
 private val EcoGreen   = Color(0xFF00FF88)
 private val EcoGreenDim = Color(0xFF00CC66)
 private val EcoYellow  = Color(0xFFFFD700)
+
+data class WasteDirectoryItem(
+    val name: String,
+    val category: String,
+    val emoji: String,
+    val type: String,
+    val material: String,
+    val environmentalImpact: String,
+    val recyclingPossibility: String,
+    val suggestedAction: String,
+    val funFact: String,
+    val aboutText: String,
+    val bestOption: String,
+    val doNot: String,
+    val whereToDispose: String
+)
+
+val wasteDirectory = listOf(
+    WasteDirectoryItem(
+        name = "Mobile Phone",
+        category = "E-Waste",
+        emoji = "📱",
+        type = "Electronic Waste (Hazardous)",
+        material = "Metals, Glass, Silicon, Rare Earth Elements",
+        environmentalImpact = "Contains heavy metals (lead, mercury) that leach into soil/groundwater if landfilled.",
+        recyclingPossibility = "Highly Recyclable (Take to specialized e-waste collection center)",
+        suggestedAction = "Do not throw in general trash. Remove SIM card, factory reset, and recycle at dedicated centers.",
+        funFact = "1 ton of mobile phones contains about 80 times more gold than a gold mine!",
+        aboutText = "Mobile phones contain precious metals and hazardous chemicals that require specialized recycling.",
+        bestOption = "Drop off at certified e-waste recycling points or manufacturer trade-in programs.",
+        doNot = "Do not incinerate or throw in standard household trash.",
+        whereToDispose = "E-waste collection bin / Authorized recycler"
+    ),
+    WasteDirectoryItem(
+        name = "Laptop",
+        category = "E-Waste",
+        emoji = "💻",
+        type = "Electronic Waste (Hazardous)",
+        material = "Aluminium, Plastic, Copper, Lithium-ion Battery",
+        environmentalImpact = "Heavy metal pollution and plastic components degrade extremely slowly.",
+        recyclingPossibility = "Recyclable (Battery must be removed and recycled separately)",
+        suggestedAction = "Donate if working. Otherwise, bring to an electronics recycling center.",
+        funFact = "Recycling 1 million laptops saves energy equivalent to the electricity used by 3,500 homes in a year!",
+        aboutText = "Laptops are complex electronic devices that contain recyclable metals and hazardous materials.",
+        bestOption = "Donate to refurbishment charity or return to manufacturer recycling scheme.",
+        doNot = "Do not discard in land bins or expose to high heat.",
+        whereToDispose = "Specialized E-waste center / Battery drop-off points"
+    ),
+    WasteDirectoryItem(
+        name = "Table",
+        category = "Wood Waste",
+        emoji = "🪵",
+        type = "Wood/Bulky Waste (Biodegradable)",
+        material = "Solid Wood / MDF, Metal Screws, Lacquer finish",
+        environmentalImpact = "MDF and varnished wood contain resins that release chemicals. Untreated wood is harmless.",
+        recyclingPossibility = "Reusable or Recyclable as wood mulch/scrap",
+        suggestedAction = "Upcycle, sand/repaint, or dismantle. Dispose bulky items at municipal bulky waste sites.",
+        funFact = "Reusing wooden furniture saves forests and reduces carbon emissions by keeping carbon locked in the wood!",
+        aboutText = "Wooden tables can last for decades. They can be easily repaired, upcycled, or converted into wood chips.",
+        bestOption = "Upcycle, sell/donate to second-hand markets, or scrap for wood recycling.",
+        doNot = "Do not burn treated or varnished wood, as it releases toxic smoke.",
+        whereToDispose = "Municipal Bulky Waste Depot / Wood Recycling Center"
+    ),
+    WasteDirectoryItem(
+        name = "Chips Wrapper",
+        category = "Plastic Waste",
+        emoji = "🍿",
+        type = "Plastic Waste (Non-Biodegradable)",
+        material = "Multi-layered Plastic (PP + PET + Foil)",
+        environmentalImpact = "Takes 100-500 years to decompose. Harmful to soil and marine life.",
+        recyclingPossibility = "Recyclable (Check Locally)",
+        suggestedAction = "Clean and dry the wrapper if possible. Dispose in dry waste or plastic recycling bin.",
+        funFact = "Recycling just 1 kg of plastic can save enough energy to power a 60W bulb for 6 hours!",
+        aboutText = "This is a multi-layered plastic wrapper commonly used for packaging chips and snacks. It is not biodegradable and can take hundreds of years to decompose.",
+        bestOption = "Recycle through plastic waste collection bins (Check local guidelines)",
+        doNot = "Do not litter or burn this waste",
+        whereToDispose = "Dry Waste Bin / Recycling Center"
+    ),
+    WasteDirectoryItem(
+        name = "Biscuit Packet",
+        category = "Plastic Waste",
+        emoji = "🍪",
+        type = "Plastic Waste (Non-Biodegradable)",
+        material = "Biaxially Oriented Polypropylene (BOPP) Film",
+        environmentalImpact = "Accumulates in land/oceans, breaking down into harmful microplastics.",
+        recyclingPossibility = "Recyclable (Check for soft plastic collection points)",
+        suggestedAction = "Compress to save space. Collect with other soft plastics for supermarket drop-offs.",
+        funFact = "Most biscuit wrappers are made from BOPP, which is thin but strong and keeps food fresh!",
+        aboutText = "Biscuit packets are soft, flexible plastic film wrappers that keep moisture out but degrade slowly.",
+        bestOption = "Collect with soft plastics and drop at participating supermarket recycling hubs.",
+        doNot = "Do not mix with rigid plastics if local guidelines forbid soft plastics.",
+        whereToDispose = "Soft Plastic Collection Bin / Dry Rubbish"
+    ),
+    WasteDirectoryItem(
+        name = "Plastic Bottle",
+        category = "Plastic Waste",
+        emoji = "🫙",
+        type = "Plastic Waste (Recyclable)",
+        material = "Polyethylene Terephthalate (PET #1)",
+        environmentalImpact = "Petroleum-based product that stays in ecosystems for up to 450 years.",
+        recyclingPossibility = "Highly Recyclable (Widely accepted in curb-side recycling)",
+        suggestedAction = "Empty contents, crush to save space, and leave cap on before recycling.",
+        funFact = "Recycling 5 PET bottles produces enough fiber to make one polyester T-shirt!",
+        aboutText = "PET bottles are the most commonly recycled plastics worldwide and can be turned into new bottles or textiles.",
+        bestOption = "Rinse, crush, and place in your blue or yellow recycling bin.",
+        doNot = "Do not throw in general trash or waterways.",
+        whereToDispose = "Plastic Recycling Bin / Deposit Return Machine"
+    ),
+    WasteDirectoryItem(
+        name = "Glass Bottle",
+        category = "Glass Waste",
+        emoji = "🍷",
+        type = "Glass Waste (Highly Recyclable)",
+        material = "Soda-lime glass",
+        environmentalImpact = "Inert but takes 1 million years to decompose. Energy intensive to manufacture from scratch.",
+        recyclingPossibility = "100% Recyclable (Can be recycled endlessly without loss of quality)",
+        suggestedAction = "Remove metal caps. Rinse clean. Separate by color (clear, green, amber) if required.",
+        funFact = "Recycling one glass bottle saves enough energy to power a computer for 25 minutes!",
+        aboutText = "Glass is made of sand, soda ash, and limestone. It is entirely recyclable and safe for reuse.",
+        bestOption = "Wash and reuse at home, or deposit in public bottle banks.",
+        doNot = "Do not mix drinking glasses or ceramics with bottle glass recycling.",
+        whereToDispose = "Glass Recycling Bin / Bottle Bank"
+    ),
+    WasteDirectoryItem(
+        name = "Cardboard Box",
+        category = "Paper Waste",
+        emoji = "📦",
+        type = "Paper Waste (Biodegradable)",
+        material = "Corrugated paper fiber",
+        environmentalImpact = "Low impact if recycled, but landfilled organic material creates methane.",
+        recyclingPossibility = "Highly Recyclable & Compostable (If not soiled with grease/food)",
+        suggestedAction = "Flatten the box. Remove packing tape and plastic wraps before recycling.",
+        funFact = "Recycling 1 ton of cardboard saves 46 gallons of oil and 9 cubic yards of landfill space!",
+        aboutText = "Corrugated cardboard boxes are widely used for shipping. They can be recycled up to 7 times.",
+        bestOption = "Flatten and recycle in the paper bin, or shred for garden compost.",
+        doNot = "Do not recycle if heavily soaked in oil, grease, or food residue.",
+        whereToDispose = "Paper/Cardboard Recycling Bin / Compost Pile"
+    ),
+    WasteDirectoryItem(
+        name = "Aluminium Can",
+        category = "Metal Waste",
+        emoji = "🥫",
+        type = "Metal Waste (Recyclable)",
+        material = "Aluminium alloy",
+        environmentalImpact = "Mining bauxite is highly destructive, but recycling saves 95% of the energy needed for new metal.",
+        recyclingPossibility = "100% Recyclable (Endlessly recyclable without degradation)",
+        suggestedAction = "Rinse to prevent insects. Crush if space is limited and put in recycling.",
+        funFact = "An aluminium can you recycle today can be back on store shelves as a new can in just 60 days!",
+        aboutText = "Beverage cans made of aluminium are the single most valuable item in the recycling stream.",
+        bestOption = "Rinse and place in metal recycling bin or use cash-for-cans machines.",
+        doNot = "Do not throw in general rubbish as metal is highly valuable.",
+        whereToDispose = "Metal Recycling Bin / Scrap Metal collector"
+    ),
+    WasteDirectoryItem(
+        name = "Food Waste",
+        category = "Organic Waste",
+        emoji = "🍎",
+        type = "Organic Waste (Compostable)",
+        material = "Organic matter (fruit peels, leftovers, vegetables)",
+        environmentalImpact = "In landfills, it produces methane gas. In compost, it fertilizes soil.",
+        recyclingPossibility = "100% Compostable (Can be turned into rich fertilizer)",
+        suggestedAction = "Segregate from dry waste. Use a backyard composter or green compost bin.",
+        funFact = "Food waste represents about 30% of global municipal solid waste!",
+        aboutText = "Kitchen scraps, fruit skins, and uneaten food can be naturally decomposed into organic soil booster.",
+        bestOption = "Compost at home or dispose in organic/wet waste collection bins.",
+        doNot = "Do not discard in plastic bags in the recycling bin.",
+        whereToDispose = "Green Wet Waste Bin / Compost Heap"
+    ),
+    WasteDirectoryItem(
+        name = "Clothes",
+        category = "Textile Waste",
+        emoji = "👕",
+        type = "Textile Waste (Reusable/Recyclable)",
+        material = "Cotton, Polyester, Wool blend",
+        environmentalImpact = "Fast fashion landfill waste decomposes slowly and releases synthetic chemicals.",
+        recyclingPossibility = "Reusable or Recyclable into rags, insulation, or new yarn",
+        suggestedAction = "Donate usable clothes. Repurpose old textiles as cleaning rags.",
+        funFact = "Over 80% of discarded textiles can be reused or recycled, but most end up in landfills!",
+        aboutText = "Textile waste includes old clothes, bed sheets, and fabrics. They should be donated or repurposed.",
+        bestOption = "Donate to thrift stores, drop in textile bank, or shred for upcycling.",
+        doNot = "Do not clean clothes in general trash.",
+        whereToDispose = "Textile Donation Box / Fabric Recycling Bin"
+    ),
+    WasteDirectoryItem(
+        name = "Battery",
+        category = "Hazardous Waste",
+        emoji = "🔋",
+        type = "Hazardous Waste (Toxic)",
+        material = "Lithium, Zinc, Manganese, Alkaline",
+        environmentalImpact = "Heavy metals can pollute soil and water. Direct fire hazard in garbage trucks.",
+        recyclingPossibility = "Recyclable at specialized toxic waste plants",
+        suggestedAction = "Never mix with standard trash. Tape the terminals to prevent short circuits.",
+        funFact = "99% of lead-acid batteries are recycled, making them one of the most recycled products in the world!",
+        aboutText = "Batteries store chemical energy. When discarded, they become hazardous waste due to toxic chemicals.",
+        bestOption = "Take to local electronics store or toxic waste depot battery drop box.",
+        doNot = "Do not place in general trash or incinerate.",
+        whereToDispose = "Dedicated Battery Recycling Container"
+    )
+)
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
@@ -58,12 +257,14 @@ fun WasteClassifierScreen(
     val scanState    by viewModel.scanState.collectAsStateWithLifecycle()
     val flashEnabled by viewModel.flashEnabled.collectAsStateWithLifecycle()
     val history      by viewModel.sessionHistory.collectAsStateWithLifecycle()
+    val liveResult   by viewModel.liveResult.collectAsStateWithLifecycle()
     val cameraRef    = remember { mutableStateOf<Camera?>(null) }
-    var capturedBmp  by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var capturedBmp  by remember { mutableStateOf<Bitmap?>(null) }
 
     val ctx         = LocalContext.current
     var previewViewRef by remember { mutableStateOf<PreviewView?>(null) }
-    
+    var selectedGridIndex by remember { mutableStateOf(3) } // Default to 3: Chips Wrapper
+
     val galleryLauncher = rememberGalleryPickerLauncher { uri ->
         try {
             val source = android.graphics.ImageDecoder.createSource(ctx.contentResolver, uri)
@@ -88,185 +289,337 @@ fun WasteClassifierScreen(
     val isClassified = scanState is WasteScanState.Classified
 
     Box(modifier = Modifier.fillMaxSize().background(Color(0xFF040A0E))) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            
+            // ── Top HUD ────────────────────────────────────────────────────────
+            WasteTopHud(
+                isClassified  = isClassified,
+                flashEnabled  = flashEnabled,
+                onBack        = {
+                    if (isClassified) {
+                        viewModel.resetScan()
+                        capturedBmp = null
+                    } else {
+                        onBack()
+                    }
+                },
+                onFlash       = { viewModel.toggleFlash() },
+                onGallery     = { galleryLauncher() }
+            )
 
-        // ── Camera preview ────────────────────────────────────────────────────
-        if (!isClassified) {
-            if (camPerm.status.isGranted) {
-                WasteCameraPreview(
-                    modifier      = Modifier.fillMaxSize(),
-                    onPreviewViewCreated = { previewViewRef = it },
-                    onCameraReady = { cameraRef.value = it },
-                    onFrame       = { bitmap -> viewModel.processLiveFrame(bitmap) }
-                )
-            } else {
-                NoCamPermView(
-                    onRequest = { camPerm.launchPermissionRequest() },
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-        }
+            if (!isClassified) {
+                // ─── IDLE MODE (Cleaner camera interface) ───────────────────
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    // Camera/Image Box Container
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1.3f)
+                            .clip(RoundedCornerShape(16.dp))
+                            .border(2.dp, EcoGreen.copy(0.4f), RoundedCornerShape(16.dp))
+                            .background(Color.Black),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (capturedBmp != null) {
+                            Image(
+                                bitmap = capturedBmp!!.asImageBitmap(),
+                                contentDescription = "Captured Waste",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else if (camPerm.status.isGranted) {
+                            WasteCameraPreview(
+                                modifier      = Modifier.fillMaxSize(),
+                                onPreviewViewCreated = { previewViewRef = it },
+                                onCameraReady = { cameraRef.value = it },
+                                onFrame       = { bitmap -> viewModel.processLiveFrame(bitmap) }
+                            )
+                        } else {
+                            NoCamPermView(
+                                onRequest = { camPerm.launchPermissionRequest() },
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
 
-        // ── Eco scanner grid ──────────────────────────────────────────────────
-        if (scanState is WasteScanState.Idle && !isClassified) EcoScannerOverlay(Modifier.fillMaxSize())
+                        // Viewfinder overlay
+                        WasteViewfinderOverlay()
 
-        // ── Top HUD ────────────────────────────────────────────────────────
-        WasteTopHud(
-            isClassified  = isClassified,
-            flashEnabled  = flashEnabled,
-            onBack        = {
-                if (isClassified) {
-                    viewModel.resetScan()
-                    capturedBmp = null
-                } else {
-                    onBack()
-                }
-            },
-            onFlash       = { viewModel.toggleFlash() },
-            onGallery     = { galleryLauncher() }
-        )
+                        // Analyzing text overlay
+                        if (scanState is WasteScanState.Scanning) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .padding(bottom = 16.dp)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(Color.Black.copy(0.8f))
+                                    .border(1.dp, EcoGreen, RoundedCornerShape(20.dp))
+                                    .padding(horizontal = 16.dp, vertical = 6.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text("🌱", fontSize = 12.sp)
+                                    Text("Analyzing object...", color = Color.White, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
 
-        // ── Scanning indicator ────────────────────────────────────────────────
-        AnimatedVisibility(
-            visible  = scanState is WasteScanState.Scanning,
-            enter    = fadeIn(), exit = fadeOut(),
-            modifier = Modifier.align(Alignment.Center)
-        ) { WasteScanningIndicator() }
+                    // Controls Row: Gallery, Scan, Torch
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Gallery Button
+                        Box(
+                            modifier = Modifier
+                                .size(50.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(0.06f))
+                                .border(1.dp, EcoGreen.copy(0.3f), CircleShape)
+                                .clickable { galleryLauncher() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("🖼️", fontSize = 20.sp)
+                        }
 
-        // ── Scan viewfinder + capture button ─────────────────────────────────
-        AnimatedVisibility(
-            visible  = scanState is WasteScanState.Idle && camPerm.status.isGranted && !isClassified,
-            enter    = fadeIn(), exit = fadeOut(),
-            modifier = Modifier.align(Alignment.Center)
-        ) { WasteViewfinder() }
+                        // Circular Scan Button
+                        Box(
+                            modifier = Modifier
+                                .size(76.dp)
+                                .clip(CircleShape)
+                                .background(Brush.radialGradient(listOf(EcoGreen, EcoGreenDim)))
+                                .border(2.dp, Color.White.copy(0.4f), CircleShape)
+                                .clickable {
+                                    if (capturedBmp != null) {
+                                        viewModel.captureAndClassify(capturedBmp!!)
+                                    } else {
+                                        val currentBitmap = previewViewRef?.bitmap
+                                        if (currentBitmap != null) {
+                                            capturedBmp = currentBitmap
+                                            viewModel.captureAndClassify(currentBitmap)
+                                        } else {
+                                            Toast.makeText(ctx, "Camera not ready", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("🔍", fontSize = 28.sp)
+                        }
 
-        AnimatedVisibility(
-            visible  = scanState is WasteScanState.Idle && camPerm.status.isGranted && !isClassified,
-            enter    = slideInVertically { it } + fadeIn(),
-            exit     = slideOutVertically { it } + fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 80.dp)
-        ) {
-            WasteCaptureButton(
-                modifier = Modifier,
-                onCapture = {
-                    previewViewRef?.bitmap?.let { bmp ->
-                        capturedBmp = bmp
-                        viewModel.captureAndClassify(bmp)
+                        // Torch Button
+                        Box(
+                            modifier = Modifier
+                                .size(50.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(0.06f))
+                                .border(1.dp, EcoGreen.copy(0.3f), CircleShape)
+                                .clickable { viewModel.toggleFlash() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(if (flashEnabled) "⚡" else "🔦", fontSize = 20.sp)
+                        }
+                    }
+
+                    // Recent Scans Section
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(0.7f),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "Recent Scans",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = EcoGreen,
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        if (history.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color.White.copy(0.02f))
+                                    .border(1.dp, Color.White.copy(0.05f), RoundedCornerShape(12.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    "No recent scans yet",
+                                    color = Color.White.copy(0.4f),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        } else {
+                            LazyRow(
+                                modifier = Modifier.fillMaxWidth().weight(1f),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                contentPadding = PaddingValues(bottom = 8.dp)
+                            ) {
+                                items(history) { item ->
+                                    Box(
+                                        modifier = Modifier
+                                            .width(140.dp)
+                                            .fillMaxHeight()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(Color(0xFF0C1622))
+                                            .border(1.dp, Color.White.copy(0.08f), RoundedCornerShape(12.dp))
+                                            .clickable {
+                                                viewModel.resetScan()
+                                                val bmp = item.imagePath?.let { path ->
+                                                    try { android.graphics.BitmapFactory.decodeFile(path) } catch (e: Exception) { null }
+                                                }
+                                                capturedBmp = bmp
+                                                bmp?.let { viewModel.captureAndClassify(it) }
+                                            }
+                                            .padding(10.dp)
+                                    ) {
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.Center,
+                                            modifier = Modifier.fillMaxSize()
+                                        ) {
+                                            Text(item.primaryType.emoji, fontSize = 28.sp)
+                                            Spacer(Modifier.height(4.dp))
+                                            Text(
+                                                text = item.exactItemName,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = Color.White,
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                textAlign = TextAlign.Center
+                                            )
+                                            Text(
+                                                text = item.primaryType.displayName,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = EcoGreen,
+                                                textAlign = TextAlign.Center
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
-            )
-        }
+            } else {
+                // ─── CLASSIFIED RESULT VIEW ─────────────────────────────────
+                val state = scanState as WasteScanState.Classified
+                val selectedIdx = state.selectedIndex
+                val results = state.results
+                val result = results.getOrElse(selectedIdx) { results[0] }
+                val know = WasteKnowledgeBase.getKnowledge(result.primaryType)
+                val pct = (result.confidence * 100).toInt()
 
-        // ── Full-Screen Classified Result view ────────────────────────────────
-        if (isClassified) {
-            val state = scanState as WasteScanState.Classified
-            val result = state.result
-            val know = WasteKnowledgeBase.getKnowledge(result.primaryType)
-            val pct = (result.confidence * 100).toInt()
-            val context = LocalContext.current
-
-            // Monitor state changes to fetch preview bitmap if needed
-            LaunchedEffect(scanState) {
-                if (capturedBmp == null) {
-                    capturedBmp = previewViewRef?.bitmap
-                }
-            }
-
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(top = 70.dp) // Leave space for Top HUD
-                    .background(Color(0xFF040A0E))
-            ) {
                 Column(
                     modifier = Modifier
                         .weight(1f)
                         .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                        .padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    // Image and Identified Info Row
+                    // Result Header Row: Image on the Left, details on the right
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color(0xFF0C1622))
+                            .border(1.dp, Color.White.copy(0.08f), RoundedCornerShape(16.dp))
+                            .padding(16.dp),
                         horizontalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        // Left: Captured Image Card
+                        // Left Side: Captured/Selected Image
                         Box(
                             modifier = Modifier
-                                .weight(1.1f)
-                                .aspectRatio(1f)
-                                .clip(RoundedCornerShape(16.dp))
-                                .border(2.dp, EcoGreen, RoundedCornerShape(16.dp))
-                                .background(Color.DarkGray)
+                                .size(130.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .border(1.dp, EcoGreen.copy(0.3f), RoundedCornerShape(12.dp))
+                                .background(Color.Black),
+                            contentAlignment = Alignment.Center
                         ) {
-                            if (capturedBmp != null) {
+                            val cachedBitmap = remember(result.imagePath) {
+                                result.imagePath?.let { path ->
+                                    try {
+                                        android.graphics.BitmapFactory.decodeFile(path)
+                                    } catch (e: Exception) {
+                                        null
+                                    }
+                                }
+                            }
+                            val displayBmp = cachedBitmap ?: capturedBmp
+                            if (displayBmp != null) {
                                 Image(
-                                    bitmap = capturedBmp!!.asImageBitmap(),
-                                    contentDescription = "Captured Waste",
+                                    bitmap = displayBmp.asImageBitmap(),
+                                    contentDescription = "Scanned Waste Object",
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier.fillMaxSize()
                                 )
                             } else {
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text("♻️", fontSize = 48.sp)
-                                }
+                                Text(result.primaryType.emoji, fontSize = 48.sp)
                             }
                         }
 
-                        // Right: Identified As & Confidence Score
+                        // Right Side: Item details & confidence
                         Column(
                             modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Text(
-                                text = "Identified As:",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = Color.White.copy(0.6f)
+                                text = result.exactItemName,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
                             )
+                            Text(
+                                text = result.primaryType.displayName + " Waste",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = EcoGreen,
+                                fontWeight = FontWeight.SemiBold
+                            )
+
+                            // Status badge
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (result.isRecyclable) EcoGreen.copy(0.12f) else Color(0xFF33151A))
+                                    .border(1.dp, if (result.isRecyclable) EcoGreen.copy(0.3f) else Color(0xFFFF073A).copy(0.3f), RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = if (result.isRecyclable) "♻️ Recyclable" else "🗑️ Non-Recyclable",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (result.isRecyclable) EcoGreen else Color(0xFFFF073A),
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            Spacer(Modifier.height(4.dp))
+                            // Confidence progress bar
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Text(
-                                    text = "♻️",
-                                    fontSize = 20.sp,
-                                    color = EcoGreen
-                                )
-                                Text(
-                                    text = result.exactItemName.ifBlank { result.primaryType.displayName },
-                                    style = MaterialTheme.typography.titleLarge,
-                                    color = EcoGreen,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-
-                            // Confidence Score Card
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(Color.White.copy(0.03f))
-                                    .border(1.dp, EcoGreen.copy(0.15f), RoundedCornerShape(14.dp))
-                                    .padding(12.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Text(
-                                    text = "Confidence Score",
+                                    "Conf: $pct%",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = Color.White.copy(0.5f)
+                                    color = Color.White.copy(0.6f)
                                 )
-                                Text(
-                                    text = "$pct%",
-                                    style = MaterialTheme.typography.headlineMedium,
-                                    color = EcoGreen,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                // Custom progress bar
                                 Box(
                                     modifier = Modifier
-                                        .fillMaxWidth()
+                                        .weight(1f)
                                         .height(6.dp)
                                         .clip(CircleShape)
                                         .background(Color.White.copy(0.1f))
@@ -278,201 +631,142 @@ fun WasteClassifierScreen(
                                             .background(EcoGreen, CircleShape)
                                     )
                                 }
-                                Text(
-                                    text = if (pct >= 85) "High Confidence" else if (pct >= 60) "Medium Confidence" else "Low Confidence",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = EcoGreen,
-                                    fontWeight = FontWeight.SemiBold
-                                )
+                            }
+                        }
+                    }
+
+                    // Tabs if multiple items detected
+                    if (results.size > 1) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                "Multiple items detected:",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White.copy(0.5f)
+                            )
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                itemsIndexed(results) { idx, item ->
+                                    val isSelected = idx == selectedIdx
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(if (isSelected) EcoGreen.copy(0.15f) else Color(0xFF0C1622))
+                                            .border(
+                                                1.dp,
+                                                if (isSelected) EcoGreen else Color.White.copy(0.08f),
+                                                RoundedCornerShape(12.dp)
+                                            )
+                                            .clickable { viewModel.selectClassifiedItem(idx) }
+                                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Text(item.primaryType.emoji, fontSize = 14.sp)
+                                            Text(
+                                                text = item.exactItemName,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = if (isSelected) EcoGreen else Color.White
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
 
                     // About This Item Card
                     EcoCard(title = "About This Item") {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = result.environmentalImpact.ifBlank { know.description },
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = Color.White.copy(0.9f),
-                                modifier = Modifier.weight(1f),
-                                lineHeight = 20.sp
+                        Text(
+                            text = result.environmentalImpact.ifBlank { know.description },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.White.copy(0.85f),
+                            lineHeight = 20.sp
+                        )
+                    }
+
+                    // Disposal Instructions Card
+                    EcoCard(title = "Disposal Instructions") {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            DisposeListItem(
+                                icon = "✅",
+                                title = "How to Dispose",
+                                desc = result.disposalMethod.ifBlank { "Dispose in dry waste / recycling center." }
                             )
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(EcoGreen.copy(0.12f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text("♻️", color = EcoGreen, fontSize = 16.sp)
-                            }
-                        }
-                    }
-
-                    // How to Dispose Card
-                    EcoCard(title = "How to Dispose") {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = if (result.isRecyclable) "Recyclable Waste" else "Non-Recyclable Waste",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = result.disposalMethod.ifBlank {
-                                        if (result.isRecyclable) "Dispose in recycling bin" else "Dispose in general waste bin"
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color.White.copy(0.6f)
+                            if (result.safetyPrecautions.isNotBlank()) {
+                                DisposeListItem(
+                                    icon = "⚠️",
+                                    title = "Safety Precautions",
+                                    desc = result.safetyPrecautions
                                 )
                             }
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(EcoGreen.copy(0.12f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text("🗑️", fontSize = 22.sp)
-                            }
+                            DisposeListItem(
+                                icon = "🌍",
+                                title = "Environmental Impact",
+                                desc = result.environmentalImpact.ifBlank { know.description }
+                            )
+                            DisposeListItem(
+                                icon = "💡",
+                                title = "Recycling Tips",
+                                desc = result.sustainabilityTip.ifBlank { know.ecoTip }
+                            )
                         }
                     }
 
-                    // Other Possible Matches Card
-                    EcoCard(title = "Other Possible Matches") {
-                        val matches = getPossibleMatches(result.primaryType, result.confidence, result.exactItemName)
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier.padding(vertical = 4.dp)
-                        ) {
-                            matches.forEachIndexed { index, match ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    // Emoji/Icon
-                                    Box(
-                                        modifier = Modifier
-                                            .size(28.dp)
-                                            .clip(CircleShape)
-                                            .background(if (index == 0) EcoGreen.copy(0.15f) else Color.White.copy(0.05f)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(match.emoji, fontSize = 14.sp)
-                                    }
-                                    
-                                    // Label
-                                    Text(
-                                        text = match.label,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = if (index == 0) Color.White else Color.White.copy(0.6f),
-                                        modifier = Modifier.width(130.dp),
-                                        maxLines = 1
-                                    )
-
-                                    // Progress Bar
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .height(6.dp)
-                                            .clip(CircleShape)
-                                            .background(Color.White.copy(0.08f))
-                                    ) {
-                                        val barColor = if (index == 0) EcoGreen else Color.White.copy(0.2f)
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxHeight()
-                                                .fillMaxWidth(match.percentage / 100f)
-                                                .background(barColor, CircleShape)
-                                        )
-                                    }
-
-                                    // Percentage
-                                    Text(
-                                        text = "${match.percentage}%",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = if (index == 0) EcoGreen else Color.White.copy(0.5f),
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.width(36.dp),
-                                        textAlign = TextAlign.End
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-                }
-
-                // Bottom Buttons row
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color(0xFF040A0E))
-                        .padding(horizontal = 16.dp, vertical = 12.dp)
-                        .navigationBarsPadding(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    // Outlined Scan Again
-                    OutlinedButton(
-                        onClick = {
-                            viewModel.resetScan()
-                            capturedBmp = null
-                        },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp),
-                        border = BorderStroke(1.5.dp, EcoGreen),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = EcoGreen)
+                    // Bottom action buttons
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                        OutlinedButton(
+                            onClick = {
+                                viewModel.resetScan()
+                                capturedBmp = null
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp),
+                            border = BorderStroke(1.5.dp, EcoGreen),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = EcoGreen)
                         ) {
-                            Text("🔄", fontSize = 14.sp)
-                            Text("Scan Again", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                            Text("📷 Scan Again", fontWeight = FontWeight.SemiBold)
                         }
-                    }
 
-                    // Solid Confirm & Save
-                    Button(
-                        onClick = {
-                            Toast.makeText(context, "Waste details confirmed & saved!", Toast.LENGTH_SHORT).show()
-                            viewModel.resetScan()
-                            capturedBmp = null
-                        },
-                        modifier = Modifier
-                            .weight(1.2f)
-                            .height(48.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = EcoGreen,
-                            contentColor = Color.Black
-                        ),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                        Button(
+                            onClick = {
+                                Toast.makeText(ctx, "Waste details confirmed & saved!", Toast.LENGTH_SHORT).show()
+                                viewModel.resetScan()
+                                capturedBmp = null
+                            },
+                            modifier = Modifier
+                                .weight(1.2f)
+                                .height(48.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = EcoGreen,
+                                contentColor = Color.Black
+                            ),
+                            shape = RoundedCornerShape(12.dp)
                         ) {
-                            Text("✓", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                            Text("Confirm & Save", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                            Text("✓ Confirm & Save", fontWeight = FontWeight.Bold)
                         }
                     }
                 }
             }
+        }
+
+        // ── Floating Robot Orb at bottom right of the screen ────────────────────
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(bottom = 24.dp, end = 24.dp)
+        ) {
+            FloatingRobotOrb(onClick = {
+                Toast.makeText(ctx, "Calling Floating AI Helper...", Toast.LENGTH_SHORT).show()
+            })
         }
 
         // ── Error ─────────────────────────────────────────────────────────────
@@ -490,11 +784,36 @@ fun WasteClassifierScreen(
                 Text("⚠️ $msg", style = MaterialTheme.typography.bodySmall, color = NeonPink)
             }
         }
+    }
+}
 
-        // ── Mini history strip ────────────────────────────────────────────────
-        if (history.isNotEmpty() && scanState is WasteScanState.Idle && !isClassified) {
-            WasteHistoryStrip(history = history, modifier = Modifier.align(Alignment.BottomCenter))
-        }
+// ══════════════════════════════════════════════════════════════════════════════
+// VIEWFINDER OVERLAY
+// ══════════════════════════════════════════════════════════════════════════════
+
+@Composable
+private fun WasteViewfinderOverlay() {
+    Canvas(modifier = Modifier.fillMaxSize().padding(24.dp)) {
+        val w = size.width
+        val h = size.height
+        val len = w * 0.15f
+        val str = 3f
+
+        // TL Corner
+        drawLine(EcoGreen, Offset(0f, 0f), Offset(len, 0f), strokeWidth = str)
+        drawLine(EcoGreen, Offset(0f, 0f), Offset(0f, len), strokeWidth = str)
+
+        // TR Corner
+        drawLine(EcoGreen, Offset(w, 0f), Offset(w - len, 0f), strokeWidth = str)
+        drawLine(EcoGreen, Offset(w, 0f), Offset(w, len), strokeWidth = str)
+
+        // BL Corner
+        drawLine(EcoGreen, Offset(0f, h), Offset(len, h), strokeWidth = str)
+        drawLine(EcoGreen, Offset(0f, h), Offset(0f, h - len), strokeWidth = str)
+
+        // BR Corner
+        drawLine(EcoGreen, Offset(w, h), Offset(w - len, h), strokeWidth = str)
+        drawLine(EcoGreen, Offset(w, h), Offset(w, h - len), strokeWidth = str)
     }
 }
 
@@ -512,7 +831,7 @@ private fun WasteCameraPreview(
     val ctx            = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope          = rememberCoroutineScope()
-    val executor       = remember { java.util.concurrent.Executors.newSingleThreadExecutor() }
+    val executor       = remember { Executors.newSingleThreadExecutor() }
     val processing     = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
 
     DisposableEffect(lifecycleOwner) {
@@ -541,7 +860,6 @@ private fun WasteCameraPreview(
             
             val analysis = ImageAnalysis.Builder()
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .setTargetResolution(android.util.Size(640, 640))
                 .build()
 
             analysis.setAnalyzer(executor) { proxy ->
@@ -577,64 +895,6 @@ private fun WasteCameraPreview(
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ECO SCANNER GRID OVERLAY
-// ══════════════════════════════════════════════════════════════════════════════
-
-@Composable
-private fun EcoScannerOverlay(modifier: Modifier) {
-    val inf   = rememberInfiniteTransition(label = "eco")
-    val alpha by inf.animateFloat(0.03f, 0.10f, infiniteRepeatable(tween(2500), RepeatMode.Reverse), label = "a")
-    val scanY by inf.animateFloat(-0.05f, 1.05f, infiniteRepeatable(tween(3500, easing = LinearEasing)), label = "s")
-    val pulse by inf.animateFloat(0.4f, 0.9f, infiniteRepeatable(tween(1500), RepeatMode.Reverse), label = "p")
-
-    Canvas(modifier = modifier) {
-        val cols = 7; val rows = 12
-        val cw = size.width / cols; val rh = size.height / rows
-        // Green eco grid
-        for (i in 0..cols) drawLine(EcoGreen.copy(alpha), Offset(i * cw, 0f), Offset(i * cw, size.height), 0.5f)
-        for (i in 0..rows) drawLine(EcoGreen.copy(alpha), Offset(0f, i * rh), Offset(size.width, i * rh), 0.5f)
-        // Scan line
-        val y = size.height * scanY
-        drawLine(
-            brush       = Brush.horizontalGradient(listOf(Color.Transparent, EcoGreen.copy(0.8f), Color.Transparent)),
-            start       = Offset(0f, y), end = Offset(size.width, y), strokeWidth = 2.5f
-        )
-    }
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// WASTE VIEWFINDER (scanning frame)
-// ══════════════════════════════════════════════════════════════════════════════
-
-@Composable
-private fun WasteViewfinder() {
-    val inf   = rememberInfiniteTransition(label = "vf")
-    val glow  by inf.animateFloat(0.4f, 1f, infiniteRepeatable(tween(1200), RepeatMode.Reverse), label = "g")
-    val size  = 240.dp
-
-    Canvas(modifier = Modifier.size(size)) {
-        val w = this.size.width; val h = this.size.height
-        val len = w * 0.22f; val str = 4f
-        // Corner brackets
-        listOf(
-            Triple(Offset(0f, 0f),       Offset(len, 0f),       Offset(0f, len)),
-            Triple(Offset(w - len, 0f),  Offset(w, 0f),         Offset(w, len)),
-            Triple(Offset(0f, h - len),  Offset(0f, h),         Offset(len, h)),
-            Triple(Offset(w - len, h),   Offset(w, h),          Offset(w, h - len))
-        ).forEach { (corner, h1, v1) ->
-            // Determine the corner point from the other two
-            val cx = if (corner.x < w / 2) 0f else w
-            val cy = if (corner.y < h / 2) 0f else h
-            drawLine(EcoGreen.copy(glow), Offset(cx, cy), h1, str)
-            drawLine(EcoGreen.copy(glow), Offset(cx, cy), v1, str)
-        }
-        // Center dot
-        drawCircle(EcoGreen.copy(glow * 0.5f), 6f, center)
-        drawCircle(EcoGreen.copy(glow), 3f, center)
-    }
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
 // TOP HUD
 // ══════════════════════════════════════════════════════════════════════════════
 
@@ -664,7 +924,7 @@ private fun WasteTopHud(
             }
             Column {
                 Text(
-                    text = if (isClassified) "♻️ Waste Recognized" else "♻️ Waste Classifier",
+                    text = "Smart Waste Classifier",
                     style = MaterialTheme.typography.titleMedium,
                     color = Color.White,
                     fontWeight = FontWeight.Bold
@@ -679,7 +939,8 @@ private fun WasteTopHud(
                     .background(Color.Black.copy(0.5f))
                     .border(1.dp, EcoGreen.copy(0.5f), RoundedCornerShape(10.dp))
                     .clickable(onClick = onGallery)
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                contentAlignment = Alignment.Center
             ) {
                 Text("🖼️", fontSize = 16.sp)
             }
@@ -689,58 +950,12 @@ private fun WasteTopHud(
                     .background(Color.Black.copy(0.5f))
                     .border(1.dp, EcoGreen.copy(0.5f), RoundedCornerShape(10.dp))
                     .clickable(onClick = onFlash)
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                contentAlignment = Alignment.Center
             ) {
                 Text(if (flashEnabled) "⚡" else "🔦", fontSize = 16.sp)
             }
         }
-    }
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// RESULTS SCREEN LAYOUT HELPER COMPONENTS & TYPES
-// ══════════════════════════════════════════════════════════════════════════════
-
-private data class PossibleMatch(val emoji: String, val label: String, val percentage: Int)
-
-private fun getPossibleMatches(primaryType: WasteType, confidence: Float, exactName: String): List<PossibleMatch> {
-    val pct = (confidence * 100).toInt().coerceIn(1, 100)
-    val name = exactName.ifBlank { primaryType.displayName }
-    
-    val pct2 = ((100 - pct) * 0.8f).toInt().coerceAtLeast(1)
-    val pct3 = ((100 - pct) * 0.2f).toInt().coerceAtLeast(1)
-
-    return when (primaryType) {
-        WasteType.PLASTIC -> listOf(
-            PossibleMatch("♻️", name, pct),
-            PossibleMatch("🛍️", "Plastic Bag", pct2),
-            PossibleMatch("⬜", "Packaging Wrapper", pct3)
-        )
-        WasteType.METAL -> listOf(
-            PossibleMatch("♻️", name, pct),
-            PossibleMatch("🥫", "Steel Can", pct2),
-            PossibleMatch("⬜", "Aluminium Foil", pct3)
-        )
-        WasteType.ORGANIC -> listOf(
-            PossibleMatch("♻️", name, pct),
-            PossibleMatch("🍌", "Fruit Peels", pct2),
-            PossibleMatch("🍂", "Garden Waste", pct3)
-        )
-        WasteType.PAPER -> listOf(
-            PossibleMatch("♻️", name, pct),
-            PossibleMatch("📰", "Newspaper", pct2),
-            PossibleMatch("⬜", "Cardboard Sheet", pct3)
-        )
-        WasteType.GLASS -> listOf(
-            PossibleMatch("♻️", name, pct),
-            PossibleMatch("🏺", "Glass Jar", pct2),
-            PossibleMatch("⬜", "Broken Glass", pct3)
-        )
-        else -> listOf(
-            PossibleMatch("♻️", name, pct),
-            PossibleMatch("🗑️", "Mixed Waste", pct2),
-            PossibleMatch("⬜", "Other Material", pct3)
-        )
     }
 }
 
@@ -754,8 +969,8 @@ private fun EcoCard(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .background(Color.White.copy(0.02f))
-            .border(1.dp, Color.White.copy(0.06f), RoundedCornerShape(16.dp))
+            .background(Color(0xFF0C1622))
+            .border(1.dp, Color.White.copy(0.08f), RoundedCornerShape(16.dp))
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -769,398 +984,64 @@ private fun EcoCard(
     }
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// CAPTURE BUTTON
-// ══════════════════════════════════════════════════════════════════════════════
-
 @Composable
-private fun WasteCaptureButton(modifier: Modifier, onCapture: () -> Unit) {
-    val inf   = rememberInfiniteTransition(label = "cap")
-    val pulse by inf.animateFloat(1f, 1.08f, infiniteRepeatable(tween(1000), RepeatMode.Reverse), label = "sc")
-    Box(
-        modifier = modifier
-            .scale(pulse)
-            .size(70.dp)
-            .clip(CircleShape)
-            .background(Brush.radialGradient(listOf(EcoGreen, EcoGreenDim)))
-            .border(3.dp, Color.White.copy(0.3f), CircleShape)
-            .clickable(onClick = onCapture),
-        contentAlignment = Alignment.Center
-    ) { Text("♻️", fontSize = 30.sp) }
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// SCANNING INDICATOR
-// ══════════════════════════════════════════════════════════════════════════════
-
-@Composable
-private fun WasteScanningIndicator() {
-    val inf = rememberInfiniteTransition(label = "wsi")
-    val rot by inf.animateFloat(0f, 360f, infiniteRepeatable(tween(1800, easing = LinearEasing)), label = "r")
-    val pulse by inf.animateFloat(0.5f, 1f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "p")
-    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Box(Modifier.size(90.dp).graphicsLayer(rotationZ = rot)) {
-            Canvas(Modifier.fillMaxSize()) {
-                drawArc(Brush.sweepGradient(listOf(Color.Transparent, EcoGreen)), 0f, 270f, false, style = Stroke(4f, cap = StrokeCap.Round))
-            }
-        }
-        Text("Analyzing waste...", style = MaterialTheme.typography.bodyMedium, color = EcoGreen.copy(alpha = pulse))
-        Text("AI powered by OpenRouter", style = MaterialTheme.typography.labelSmall, color = Color.White.copy(0.5f))
-    }
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// WASTE RESULT SHEET
-// ══════════════════════════════════════════════════════════════════════════════
-
-@Composable
-private fun WasteResultSheet(result: WasteResult, onRescan: () -> Unit, onSpeak: () -> Unit) {
-    val color = Color(result.primaryType.colorArgb)
-    val know  = WasteKnowledgeBase.getKnowledge(result.primaryType)
-    val pct   = (result.confidence * 100).toInt()
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
-            .background(Brush.verticalGradient(listOf(Color(0xF0060D1F), Color(0xFA040A10))))
-            .border(1.dp, Brush.horizontalGradient(listOf(color.copy(0.7f), EcoGreen.copy(0.3f))), RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
-            .navigationBarsPadding()
-    ) {
-        // Drag handle
-        Box(Modifier.padding(top = 10.dp).width(40.dp).height(4.dp).clip(CircleShape).background(color.copy(0.5f)).align(Alignment.CenterHorizontally))
-
-        Column(
-            modifier = Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            // ── Header ────────────────────────────────────────────────────────
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(52.dp).clip(RoundedCornerShape(14.dp)).background(color.copy(0.15f)).border(1.dp, color.copy(0.4f), RoundedCornerShape(14.dp)), Alignment.Center) {
-                        Text(result.primaryType.emoji, fontSize = 28.sp)
-                    }
-                    Column {
-                        Text(result.exactItemName.ifBlank { result.primaryType.displayName }, style = MaterialTheme.typography.headlineSmall, color = Color.White, fontWeight = FontWeight.Bold)
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            NeonBadge(result.recyclingCategory.ifBlank { result.primaryType.bin }, color)
-                            NeonBadge("$pct% match", EcoGreen)
-                        }
-                    }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Box(Modifier.size(34.dp).clip(CircleShape).background(Color.White.copy(0.08f)).clickable(onClick = onSpeak), Alignment.Center) { Text("🔊", fontSize = 14.sp) }
-                    Box(Modifier.size(34.dp).clip(CircleShape).background(Color.White.copy(0.08f)).clickable(onClick = onRescan), Alignment.Center) { Text("🔄", fontSize = 14.sp) }
-                }
-            }
-
-            // Confidence bar
-            WasteConfidenceBar(confidence = result.confidence, color = color)
-
-            // ── Eco Dashboard (Eco Score + Carbon Reduction) ──────────────────
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(Color.White.copy(0.02f))
-                    .border(1.dp, Color.White.copy(0.08f), RoundedCornerShape(18.dp))
-                    .padding(14.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    EcoScoreGauge(score = result.ecoScore)
-                    Box(modifier = Modifier.weight(1f)) {
-                        CarbonReductionCard(carbonReduction = result.carbonReduction)
-                    }
-                }
-            }
-
-            // ── Recyclability & Reusability Badges ────────────────────────────
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                // Recyclable card
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(if (result.isRecyclable) EcoGreen.copy(0.1f) else NeonPink.copy(0.1f))
-                        .border(1.dp, if (result.isRecyclable) EcoGreen.copy(0.3f) else NeonPink.copy(0.3f), RoundedCornerShape(14.dp))
-                        .padding(12.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(if (result.isRecyclable) "♻️ Recyclable" else "🗑️ Non-Recyclable", 
-                        style = MaterialTheme.typography.bodySmall, 
-                        color = if (result.isRecyclable) EcoGreen else NeonPink,
-                        fontWeight = FontWeight.Bold)
-                }
-                
-                // Reusable card
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(if (result.isReusable) NeonBlue.copy(0.1f) else NeonOrange.copy(0.1f))
-                        .border(1.dp, if (result.isReusable) NeonBlue.copy(0.3f) else NeonOrange.copy(0.3f), RoundedCornerShape(14.dp))
-                        .padding(12.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(if (result.isReusable) "🔄 Reusable" else "🚫 Single-Use Only", 
-                        style = MaterialTheme.typography.bodySmall, 
-                        color = if (result.isReusable) NeonBlue else NeonOrange,
-                        fontWeight = FontWeight.Bold)
-                }
-            }
-
-            // ── Category bars ─────────────────────────────────────────────────
-            WasteCategoryBars(result.allCategories.take(5))
-
-            // ── Recycling rate ────────────────────────────────────────────────
-            RecyclingRateCard(know.recyclingRate, color)
-
-            // ── Disposal Steps ────────────────────────────────────────────────
-            val steps = result.disposalSteps.ifEmpty { know.disposalSteps }
-            WasteSection("Disposal Steps", "🗑️", color) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    steps.forEachIndexed { i, step ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
-                            Box(
-                                modifier = Modifier
-                                    .size(24.dp)
-                                    .clip(CircleShape)
-                                    .background(color.copy(0.15f))
-                                    .border(1.dp, color.copy(0.4f), CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text("${i + 1}", style = MaterialTheme.typography.labelSmall, color = color, fontWeight = FontWeight.Bold)
-                            }
-                            Text(step, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f), modifier = Modifier.weight(1f), lineHeight = 18.sp)
-                        }
-                    }
-                }
-            }
-
-            // ── Sustainability Tip ──────────────────────────────────────────
-            val tip = result.sustainabilityTip.ifBlank { know.ecoTip }
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(EcoGreen.copy(0.08f))
-                    .border(1.dp, EcoGreen.copy(0.25f), RoundedCornerShape(14.dp))
-                    .padding(14.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text("🌱", fontSize = 20.sp)
-                Column {
-                    Text("Sustainability Tip", style = MaterialTheme.typography.labelSmall, color = EcoGreen, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(2.dp))
-                    Text(tip, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.9f), lineHeight = 18.sp)
-                }
-            }
-
-            // ── Reuse Suggestions ────────────────────────────────────────────
-            val reuse = result.reuseSuggestions.ifBlank { know.reusabilityInfo }
-            WasteSection("Reuse Suggestions", "♻️", EcoGreen) {
-                Text(reuse, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f), lineHeight = 18.sp)
-            }
-
-            // ── Environmental Impact ─────────────────────────────────────────
-            val impact = result.environmentalImpact.ifBlank { know.description }
-            WasteSection("Environmental Impact", "🌍", NeonOrange) {
-                Text(impact, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f), lineHeight = 18.sp)
-            }
-
-            // ── Fun fact ──────────────────────────────────────────────────────
-            Row(
-                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(color.copy(0.08f)).border(1.dp, color.copy(0.25f), RoundedCornerShape(12.dp)).padding(12.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Text("💡", fontSize = 18.sp)
-                Column {
-                    Text("Did You Know?", style = MaterialTheme.typography.labelSmall, color = color, fontWeight = FontWeight.Bold)
-                    Text(know.funFact, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f), lineHeight = 18.sp)
-                }
-            }
-
-            Spacer(Modifier.height(8.dp))
-        }
-    }
-}
-
-@Composable
-private fun EcoScoreGauge(score: Int) {
-    val animScore by animateFloatAsState(targetValue = score.toFloat() / 100f, animationSpec = tween(1200, easing = FastOutSlowInEasing), label = "eco")
-    val color = when {
-        score >= 80 -> EcoGreen
-        score >= 50 -> EcoYellow
-        else -> NeonPink
-    }
-    
-    Box(
-        contentAlignment = Alignment.Center, 
-        modifier = Modifier
-            .size(80.dp)
-            .clip(CircleShape)
-            .background(Color.White.copy(0.03f))
-            .border(1.dp, color.copy(0.15f), CircleShape)
-    ) {
-        Canvas(Modifier.fillMaxSize().padding(6.dp)) {
-            // Draw background track
-            drawArc(Color.White.copy(0.06f), -90f, 360f, false, style = Stroke(6f))
-            // Draw animated progress track
-            drawArc(
-                brush = Brush.sweepGradient(listOf(color.copy(0.3f), color)),
-                startAngle = -90f,
-                sweepAngle = 360f * animScore,
-                useCenter = false,
-                style = Stroke(6f, cap = StrokeCap.Round)
-            )
-        }
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                text = "$score",
-                style = MaterialTheme.typography.titleMedium,
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp
-            )
-            Text(
-                text = "Score",
-                style = MaterialTheme.typography.labelSmall,
-                color = color,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 9.sp
-            )
-        }
-    }
-}
-
-@Composable
-private fun CarbonReductionCard(carbonReduction: String) {
+private fun DetailRow(icon: String, label: String, value: String) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color.White.copy(0.04f))
-            .border(1.5.dp, Brush.horizontalGradient(listOf(EcoGreen.copy(0.2f), Color.Cyan.copy(0.1f))), RoundedCornerShape(14.dp))
-            .padding(12.dp),
+        modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment = Alignment.Top
     ) {
         Box(
             modifier = Modifier
-                .size(36.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(EcoGreen.copy(0.12f))
-                .border(1.dp, EcoGreen.copy(0.3f), RoundedCornerShape(10.dp)),
+                .size(32.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(EcoGreen.copy(0.1f)),
             contentAlignment = Alignment.Center
         ) {
-            Text("🌍", fontSize = 18.sp)
+            Text(icon, fontSize = 16.sp)
         }
-        Column {
-            Text(
-                text = "Carbon Saved Est.",
-                style = MaterialTheme.typography.labelSmall,
-                color = Color.White.copy(0.5f),
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                text = carbonReduction.ifBlank { "0.8 kg CO₂" },
-                style = MaterialTheme.typography.bodyMedium,
-                color = EcoGreen,
-                fontWeight = FontWeight.Bold
-            )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.labelSmall, color = EcoGreen, fontWeight = FontWeight.Bold)
+            Text(value, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f), lineHeight = 16.sp)
         }
     }
 }
 
 @Composable
-private fun WasteConfidenceBar(confidence: Float, color: Color) {
-    val pct    = (confidence * 100).toInt()
-    val anim   by animateFloatAsState(targetValue = confidence, animationSpec = tween(700), label = "c")
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("Classification confidence", style = MaterialTheme.typography.labelSmall, color = Color.White.copy(0.6f))
-            Text("$pct%", style = MaterialTheme.typography.labelSmall, color = color, fontWeight = FontWeight.Bold)
-        }
-        Box(Modifier.fillMaxWidth().height(6.dp).clip(CircleShape).background(Color.White.copy(0.1f))) {
-            Box(Modifier.fillMaxHeight().fillMaxWidth(anim).background(Brush.horizontalGradient(listOf(EcoGreen, color)), CircleShape))
-        }
-    }
-}
-
-@Composable
-private fun WasteCategoryBars(categories: List<WasteCategoryScore>) {
-    WasteSection("Category Breakdown", "📊", EcoGreen) {
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            categories.forEach { cat ->
-                val color = Color(cat.type.colorArgb)
-                val anim  by animateFloatAsState(targetValue = cat.score, animationSpec = tween(600), label = "b")
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(cat.type.emoji, fontSize = 14.sp, modifier = Modifier.width(24.dp))
-                    Box(Modifier.weight(1f).height(6.dp).clip(CircleShape).background(Color.White.copy(0.1f))) {
-                        Box(Modifier.fillMaxHeight().fillMaxWidth(anim).background(color, CircleShape))
-                    }
-                    Text("${(cat.score * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = color, modifier = Modifier.width(36.dp), fontWeight = FontWeight.SemiBold)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun RecyclingRateCard(rate: Float, color: Color) {
-    val pct  = (rate * 100).toInt()
-    val anim by animateFloatAsState(targetValue = rate, animationSpec = tween(900), label = "rr")
+private fun DisposeListItem(icon: String, title: String, desc: String) {
     Row(
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(color.copy(0.08f)).border(1.dp, color.copy(0.25f), RoundedCornerShape(12.dp)).padding(12.dp),
-        horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.Top
     ) {
-        Column {
-            Text("Global Recycling Rate", style = MaterialTheme.typography.labelSmall, color = Color.White.copy(0.6f))
-            Text("$pct% recycled worldwide", style = MaterialTheme.typography.bodyMedium, color = Color.White, fontWeight = FontWeight.SemiBold)
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .background(Color.White.copy(0.04f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(icon, fontSize = 16.sp)
         }
-        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(52.dp)) {
-            Canvas(Modifier.fillMaxSize()) {
-                drawArc(Color.White.copy(0.1f), -90f, 360f, false, style = Stroke(6f))
-                drawArc(color, -90f, 360f * anim, false, style = Stroke(6f, cap = StrokeCap.Round))
-            }
-            Text("$pct%", style = MaterialTheme.typography.labelSmall, color = color, fontWeight = FontWeight.Bold)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.labelSmall, color = EcoGreen, fontWeight = FontWeight.Bold)
+            Text(desc, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f), lineHeight = 16.sp)
         }
     }
 }
 
 @Composable
-private fun WasteSection(title: String, icon: String, color: Color, content: @Composable () -> Unit) {
-    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color.White.copy(0.04f)).border(1.dp, color.copy(0.2f), RoundedCornerShape(14.dp)).padding(14.dp)) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(icon, fontSize = 14.sp)
-                Text(title, style = MaterialTheme.typography.labelMedium, color = color, fontWeight = FontWeight.Bold)
-            }
-            HorizontalDivider(color = color.copy(0.15f))
-            content()
-        }
-    }
-}
-
-@Composable
-private fun WasteHistoryStrip(history: List<WasteResult>, modifier: Modifier) {
-    Row(
-        modifier = modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(0.8f)))).padding(horizontal = 16.dp).padding(bottom = 16.dp).navigationBarsPadding(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+private fun FloatingRobotOrb(onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(56.dp)
+            .clip(CircleShape)
+            .background(Brush.radialGradient(listOf(Color(0xFF00FF88), Color(0xFF005F44))))
+            .border(2.dp, Color.White.copy(0.4f), CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
     ) {
-        history.take(5).forEach { r ->
-            val color = Color(r.primaryType.colorArgb)
-            Box(
-                Modifier.clip(RoundedCornerShape(10.dp)).background(color.copy(0.15f)).border(1.dp, color.copy(0.4f), RoundedCornerShape(10.dp)).padding(horizontal = 10.dp, vertical = 6.dp)
-            ) { Text("${r.primaryType.emoji} ${r.primaryType.displayName}", style = MaterialTheme.typography.labelSmall, color = color, fontWeight = FontWeight.SemiBold) }
-        }
+        Text("🤖", fontSize = 28.sp)
     }
 }
 

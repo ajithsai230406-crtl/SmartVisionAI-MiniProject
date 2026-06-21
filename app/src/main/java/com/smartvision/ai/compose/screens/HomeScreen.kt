@@ -26,6 +26,12 @@ import java.util.Calendar
 import java.util.Locale
 import coil.compose.AsyncImage
 import androidx.compose.ui.layout.ContentScale
+import android.app.Activity
+import android.content.Intent
+import android.speech.RecognizerIntent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
 
 // ── 9 modules only — AI Assistant is the floating orb, NOT a card ─────────────
 private data class QuickModule(
@@ -44,7 +50,8 @@ private val modules = listOf(
     QuickModule("Text Translator",        "🌐", AccentTranslate,Routes.TRANSLATOR_V2),
     QuickModule("QR & Barcode Scanner",   "📷", AccentQR,       Routes.QR_SCANNER_V2),
     QuickModule("Smart Document Scanner", "📄", AccentDocument, Routes.DOCUMENT_SCANNER),
-    QuickModule("Medicine Scanner",       "💊", AccentMedicine, Routes.MEDICINE_SCANNER)
+    QuickModule("Medicine Scanner",       "💊", AccentMedicine, Routes.MEDICINE_SCANNER),
+    QuickModule("Career Assistant",       "💼", AccentCareer,   Routes.CAREER_ASSISTANT)
 )
 
 private data class DynamicGreeting(
@@ -94,6 +101,17 @@ fun HomeScreen(
     val historyItems by historyViewModel.history.collectAsStateWithLifecycle()
     val profile      by authViewModel.profile.collectAsStateWithLifecycle()
     var searchQuery  by remember { mutableStateOf("") }
+    val context      = LocalContext.current
+    val speechRecognizerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val spokenText = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+            if (!spokenText.isNullOrBlank()) {
+                searchQuery = spokenText
+            }
+        }
+    }
 
     val infiniteTransition = rememberInfiniteTransition(label = "homeBg")
     val bgGlowAlpha by infiniteTransition.animateFloat(
@@ -108,34 +126,68 @@ fun HomeScreen(
             .background(DeepNavy)
     ) {
         // ── Ambient background glow orbs ──────────────────────────────────
-        Box(
-            modifier = Modifier
-                .size(350.dp)
-                .offset((-100).dp, (-80).dp)
-                .clip(CircleShape)
-                .background(NeonBlue.copy(alpha = bgGlowAlpha))
-        )
-        Box(
-            modifier = Modifier
-                .size(280.dp)
-                .align(Alignment.TopEnd)
-                .offset(80.dp, 60.dp)
-                .clip(CircleShape)
-                .background(NeonPurple.copy(alpha = bgGlowAlpha * 0.8f))
-        )
-        Box(
-            modifier = Modifier
-                .size(200.dp)
-                .align(Alignment.BottomStart)
-                .offset((-40).dp, 40.dp)
-                .clip(CircleShape)
-                .background(NeonCyan.copy(alpha = bgGlowAlpha * 0.5f))
-        )
+        if (ext.themeMode == "NEON_DARK") {
+            Box(
+                modifier = Modifier
+                    .size(350.dp)
+                    .offset((-100).dp, (-80).dp)
+                    .clip(CircleShape)
+                    .background(NeonBlue.copy(alpha = bgGlowAlpha))
+            )
+            Box(
+                modifier = Modifier
+                    .size(280.dp)
+                    .align(Alignment.TopEnd)
+                    .offset(80.dp, 60.dp)
+                    .clip(CircleShape)
+                    .background(NeonPurple.copy(alpha = bgGlowAlpha * 0.8f))
+            )
+            Box(
+                modifier = Modifier
+                    .size(200.dp)
+                    .align(Alignment.BottomStart)
+                    .offset((-40).dp, 40.dp)
+                    .clip(CircleShape)
+                    .background(NeonCyan.copy(alpha = bgGlowAlpha * 0.5f))
+            )
+        }
 
         LazyColumn(
             modifier        = Modifier.fillMaxSize(),
-            contentPadding  = PaddingValues(bottom = 120.dp)
+            contentPadding  = PaddingValues(bottom = 24.dp)
         ) {
+            // ── Search Bar ────────────────────────────────────────────────
+            item {
+                SmartSearchBar(
+                    query         = searchQuery,
+                    onQueryChange = { searchQuery = it },
+                    placeholder   = "Search  about history and modules...",
+                    modifier      = Modifier.padding(horizontal = 20.dp, vertical = 4.dp).padding(top = 16.dp).statusBarsPadding(),
+                    trailingIcon  = {
+                        Text(
+                            "🎙️",
+                            fontSize = 20.sp,
+                            modifier = Modifier
+                                .padding(start = 8.dp)
+                                .clickable {
+                                    try {
+                                        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                                            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                                            putExtra(RecognizerIntent.EXTRA_LANGUAGE, java.util.Locale.getDefault())
+                                            putExtra(RecognizerIntent.EXTRA_PROMPT, "Search modules and history...")
+                                        }
+                                        speechRecognizerLauncher.launch(intent)
+                                    } catch (e: Exception) {
+                                        android.widget.Toast.makeText(context, "Speech recognition not supported", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                        )
+                    }
+                )
+            }
+
+            item { Spacer(Modifier.height(12.dp)) }
+
             // ── Greeting Header ───────────────────────────────────────────
             item {
                 val firstName = remember(profile.name) {
@@ -205,7 +257,7 @@ fun HomeScreen(
                                 Text(
                                     text = greeting.title,
                                     style = MaterialTheme.typography.titleMedium,
-                                    color = Color.White,
+                                    color = MaterialTheme.colorScheme.onSurface,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
@@ -253,25 +305,7 @@ fun HomeScreen(
                 }
             }
 
-            // ── Search Bar ────────────────────────────────────────────────
-            item {
-                SmartSearchBar(
-                    query         = searchQuery,
-                    onQueryChange = { searchQuery = it },
-                    modifier      = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
-                    trailingIcon  = {
-                        Text(
-                            "🎙️",
-                            fontSize = 20.sp,
-                            modifier = Modifier
-                                .padding(start = 8.dp)
-                                .clickable { onNavigate(Routes.VOICE_TRANSLATOR_V2) }
-                        )
-                    }
-                )
-            }
 
-            item { Spacer(Modifier.height(24.dp)) }
 
             // ── Quick Access Header ───────────────────────────────────────
             item {
@@ -297,7 +331,7 @@ fun HomeScreen(
                             .padding(horizontal = 10.dp, vertical = 3.dp)
                     ) {
                         Text(
-                            "9 Modules",
+                            "10 Modules",
                             style      = MaterialTheme.typography.labelSmall,
                             color      = NeonBlue,
                             fontWeight = FontWeight.SemiBold
@@ -394,6 +428,7 @@ fun HomeScreen(
                         "Medicine" -> AccentMedicine
                         "QR"       -> AccentQR
                         "Document" -> AccentDocument
+                        "Career"   -> AccentCareer
                         else       -> NeonBlue
                     }
                     val fmt = SimpleDateFormat("dd MMM, HH:mm", Locale.getDefault())
@@ -409,7 +444,6 @@ fun HomeScreen(
                 }
             }
         }
-
     }
 }
 

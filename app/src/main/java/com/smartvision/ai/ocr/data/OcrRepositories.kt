@@ -21,6 +21,8 @@ import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -91,6 +93,33 @@ class OcrRecognitionRepository @Inject constructor(
         }
     }
 
+    suspend fun recognizeAutoScriptFromImage(
+        image: Image,
+        rotation: Int
+    ): Result<Text> = withContext(Dispatchers.Default) {
+        runCatching {
+            val input = InputImage.fromMediaImage(image, rotation)
+            val scripts = OcrScript.values()
+            val deferreds = scripts.map { script ->
+                async {
+                    runCatching { recognizerFor(script).process(input).await() }
+                }
+            }
+            val results = deferreds.map { it.await() }
+            var bestText: Text? = null
+            var maxLen = -1
+            for (res in results) {
+                res.onSuccess { text ->
+                    if (text.text.length > maxLen) {
+                        maxLen = text.text.length
+                        bestText = text
+                    }
+                }
+            }
+            bestText ?: throw Exception("Auto script detection returned no results")
+        }
+    }
+
     // ── Bitmap (from gallery or captured frame) ───────────────────────────────
     /**
      * Recognizes text from a [Bitmap], applying the full preprocessing pipeline first.
@@ -116,6 +145,34 @@ class OcrRecognitionRepository @Inject constructor(
             } else {
                 primary
             }
+        }
+    }
+
+    suspend fun recognizeAutoScriptFromBitmap(
+        bitmap: Bitmap,
+        preprocess: Boolean = true
+    ): Result<Text> = withContext(Dispatchers.Default) {
+        runCatching {
+            val processed = if (preprocess) preprocessor.preprocess(bitmap) else bitmap
+            val input = InputImage.fromBitmap(processed, 0)
+            val scripts = OcrScript.values()
+            val deferreds = scripts.map { script ->
+                async {
+                    runCatching { recognizerFor(script).process(input).await() }
+                }
+            }
+            val results = deferreds.map { it.await() }
+            var bestText: Text? = null
+            var maxLen = -1
+            for (res in results) {
+                res.onSuccess { text ->
+                    if (text.text.length > maxLen) {
+                        maxLen = text.text.length
+                        bestText = text
+                    }
+                }
+            }
+            bestText ?: throw Exception("Auto script detection returned no results")
         }
     }
 

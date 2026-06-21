@@ -11,9 +11,10 @@ data class HistoryEntity(
     val title: String,
     val details: String,
     val createdAt: Long,
-    val userId: String = ""
+    val userId: String = "",
+    val detailsJson: String = ""
 ) {
-    fun toDomain() = HistoryRecord(id, type, title, details, createdAt)
+    fun toDomain() = HistoryRecord(id, type, title, details, createdAt, detailsJson)
 }
 
-fun HistoryRecord.toEntity(userId: String) = HistoryEntity(id, type, title, details, createdAt, userId)
+fun HistoryRecord.toEntity(userId: String) = HistoryEntity(id, type, title, details, createdAt, userId, detailsJson)

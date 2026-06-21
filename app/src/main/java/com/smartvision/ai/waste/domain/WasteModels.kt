@@ -21,7 +21,8 @@ enum class WasteType(
     TEXTILE      ("Textile",       "👕", 0xFFBF5FFF, "Textile Box", "CLO"),
     NON_RECYCLABLE("Non-Recyclable","🗑️",0xFF555555, "Black Bin",  "—"),
     MIXED        ("Mixed Waste",   "♻️", 0xFF7B7BFF, "Check First", "MIX"),
-    RECYCLABLE   ("Recyclable",    "♻️", 0xFF00FF88, "Blue Bin",    "REC")
+    RECYCLABLE   ("Recyclable",    "♻️", 0xFF00FF88, "Blue Bin",    "REC"),
+    WOOD         ("Wood Waste",    "🪵", 0xFF8B5A2B, "Bulky Depot", "WOOD")
 }
 
 /** Rich per-type knowledge */
@@ -53,7 +54,10 @@ data class WasteResult(
     val carbonImpact:       String = "",   // per-item carbon cost, e.g. "6.2 kg CO₂/kg"
     val sustainabilityTip:  String = "",
     val isRecyclable:       Boolean = true,
-    val isReusable:         Boolean = true
+    val isReusable:         Boolean = true,
+    val isDecomposable:     Boolean = false,
+    val imagePath:          String? = null,
+    val safetyPrecautions:  String = ""
 )
 
 data class WasteCategoryScore(val type: WasteType, val score: Float)
@@ -63,7 +67,7 @@ sealed class WasteScanState {
     object Idle         : WasteScanState()
     object Scanning     : WasteScanState()  // one-shot scan in progress
     object LiveScanning : WasteScanState()  // live scan active, showing camera
-    data class Classified(val result: WasteResult) : WasteScanState()
+    data class Classified(val results: List<WasteResult>, val selectedIndex: Int = 0) : WasteScanState()
     data class Error(val message: String)          : WasteScanState()
 }
 
@@ -81,6 +85,7 @@ fun String.toWasteType(): WasteType = when (this.lowercase().trim()) {
     "clothing", "textile", "rubber"                         -> WasteType.TEXTILE
     "mixed_waste"                                           -> WasteType.MIXED
     "recyclable", "recyclable_waste"                        -> WasteType.RECYCLABLE
+    "wood", "wood_waste", "timber", "furniture"             -> WasteType.WOOD
     else                                                    -> WasteType.NON_RECYCLABLE
 }
 
@@ -218,6 +223,16 @@ object WasteKnowledgeBase {
             carbonFootprint  = "Recycling saves substantial carbon compared to virgin manufacturing.",
             recyclingRate    = 0.75f,
             funFact          = "Recycling one ton of paper saves 17 trees, 7,000 gallons of water, and 4,000 kilowatts of electricity."
+        ),
+        WasteType.WOOD to WasteKnowledge(
+            type             = WasteType.WOOD,
+            description      = "Wood waste includes wooden furniture, timber, pallets, and sawdust. Clean wood is biodegradable and highly recyclable.",
+            disposalSteps    = listOf("Remove metal screws and nails", "Dismantle large items if possible", "Take to a municipal bulky waste depot", "Keep away from generic wet waste", "Do not dump in regular trash bins"),
+            ecoTip           = "Reusing wooden furniture or upcycling it into new items saves forests and locked-in carbon.",
+            reusabilityInfo  = "Highly reusable for upcycling, crafting, composting, or converting into wood mulch/chips.",
+            carbonFootprint  = "Using recycled wood reduces carbon emissions compared to manufacturing from virgin timber.",
+            recyclingRate    = 0.70f,
+            funFact          = "Untreated wood can decompose in a few years, but varnished or treated wood releases harmful toxic chemicals if burned."
         )
     )
 

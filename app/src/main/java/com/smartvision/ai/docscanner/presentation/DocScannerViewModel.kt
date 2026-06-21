@@ -86,6 +86,7 @@ class DocScannerViewModel @Inject constructor(
         val doc = ScannedDocument(
             name      = _docName.value,
             pages     = pages,
+            originalPages = pages,
             filter    = _selectedFilter.value,
             exportFormat = _exportFormat.value
         )

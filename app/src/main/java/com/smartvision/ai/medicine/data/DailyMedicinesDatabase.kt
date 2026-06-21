@@ -27,7 +27,9 @@ object DailyMedicinesDatabase {
             rx = false,
             score = 9,
             level = SafetyLevel.SAFE,
-            summary = "Paracetamol is widely used for reducing fever and managing mild to moderate pain. It is safe when used within recommended dosage limits."
+            summary = "Paracetamol is widely used for reducing fever and managing mild to moderate pain. It is safe when used within recommended dosage limits.",
+            manufacturer = "GSK / Micro Labs / Cipla",
+            alternatives = listOf("Ibuprofen 400mg", "Aspirin 500mg", "Mefenamic Acid 500mg", "Naproxen 250mg")
         ))
         add(createMed(
             name = "Metformin 500mg",
@@ -48,7 +50,9 @@ object DailyMedicinesDatabase {
             rx = true,
             score = 8,
             level = SafetyLevel.CAUTION,
-            summary = "Metformin is a first-line medication for type 2 diabetes. It enhances insulin sensitivity and reduces glucose production in the liver."
+            summary = "Metformin is a first-line medication for type 2 diabetes. It enhances insulin sensitivity and reduces glucose production in the liver.",
+            manufacturer = "Merck / USV / Franco-Indian",
+            alternatives = listOf("Glimepiride 1mg", "Sitagliptin 100mg", "Vildagliptin 50mg", "Pioglitazone 15mg")
         ))
         add(createMed(
             name = "Ibuprofen 400mg",
@@ -69,7 +73,9 @@ object DailyMedicinesDatabase {
             rx = false,
             score = 8,
             level = SafetyLevel.MODERATE,
-            summary = "Ibuprofen is a nonsteroidal anti-inflammatory drug (NSAID) used to relieve pain, fever, and acute inflammation."
+            summary = "Ibuprofen is a nonsteroidal anti-inflammatory drug (NSAID) used to relieve pain, fever, and acute inflammation.",
+            manufacturer = "Pfizer / Abbott / Sun Pharma",
+            alternatives = listOf("Paracetamol 500mg", "Naproxen 250mg", "Diclofenac 50mg", "Mefenamic Acid 500mg")
         ))
         add(createMed(
             name = "Cetirizine 10mg",
@@ -90,7 +96,9 @@ object DailyMedicinesDatabase {
             rx = false,
             score = 9,
             level = SafetyLevel.SAFE,
-            summary = "Cetirizine is a popular second-generation antihistamine offering 24-hour relief from common allergy symptoms with minimal drowsiness."
+            summary = "Cetirizine is a popular second-generation antihistamine offering 24-hour relief from common allergy symptoms with minimal drowsiness.",
+            manufacturer = "UCB Pharma / Dr. Reddy's / Cipla",
+            alternatives = listOf("Loratadine 10mg", "Fexofenadine 120mg", "Levocetirizine 5mg", "Desloratadine 5mg")
         ))
         add(createMed(
             name = "Pantoprazole 40mg",
@@ -111,7 +119,9 @@ object DailyMedicinesDatabase {
             rx = false,
             score = 8,
             level = SafetyLevel.MODERATE,
-            summary = "Pantoprazole suppresses stomach acid production, helping heal acid-induced inflammation and ulcers in the esophagus and stomach."
+            summary = "Pantoprazole suppresses stomach acid production, helping heal acid-induced inflammation and ulcers in the esophagus and stomach.",
+            manufacturer = "Alkem / Sun Pharma / Pfizer",
+            alternatives = listOf("Omeprazole 20mg", "Esomeprazole 40mg", "Rabeprazole 20mg", "Lansoprazole 30mg")
         ))
         add(createMed(
             name = "Amlodipine 5mg",
@@ -132,7 +142,9 @@ object DailyMedicinesDatabase {
             rx = true,
             score = 8,
             level = SafetyLevel.CAUTION,
-            summary = "Amlodipine relaxes blood vessels, improving blood flow and lowering systemic blood pressure, which reduces heart strain."
+            summary = "Amlodipine relaxes blood vessels, improving blood flow and lowering systemic blood pressure, which reduces heart strain.",
+            manufacturer = "Pfizer / Cipla / Lupin",
+            alternatives = listOf("Nifedipine 30mg", "Felodipine 5mg", "Diltiazem 60mg", "Verapamil 80mg")
         ))
         add(createMed(
             name = "Atorvastatin 10mg",
@@ -153,7 +165,9 @@ object DailyMedicinesDatabase {
             rx = true,
             score = 8,
             level = SafetyLevel.CAUTION,
-            summary = "Atorvastatin is a statin that lowers blood cholesterol levels and stabilizes arterial plaque to prevent strokes and heart attacks."
+            summary = "Atorvastatin is a statin that lowers blood cholesterol levels and stabilizes arterial plaque to prevent strokes and heart attacks.",
+            manufacturer = "Pfizer / Ranbaxy / Zydus",
+            alternatives = listOf("Rosuvastatin 10mg", "Simvastatin 20mg", "Pravastatin 40mg", "Fluvastatin 40mg")
         ))
         add(createMed(
             name = "Lisinopril 10mg",
@@ -175,7 +189,9 @@ object DailyMedicinesDatabase {
             score = 7,
             level = SafetyLevel.CAUTION,
             emergencyWarning = "If face, tongue, or throat swelling occurs, seek emergency care immediately (angioedema risk).",
-            summary = "Lisinopril lowers blood pressure by dilating blood vessels and is commonly prescribed to protect heart and kidney function."
+            summary = "Lisinopril lowers blood pressure by dilating blood vessels and is commonly prescribed to protect heart and kidney function.",
+            manufacturer = "AstraZeneca / Merck / Lupin",
+            alternatives = listOf("Enalapril 5mg", "Ramipril 5mg", "Perindopril 4mg", "Captopril 25mg")
         ))
         add(createMed(
             name = "Aspirin 75mg",
@@ -196,7 +212,9 @@ object DailyMedicinesDatabase {
             rx = false,
             score = 8,
             level = SafetyLevel.MODERATE,
-            summary = "Low-dose Aspirin prevents blood platelets from sticking together, which reduces the chance of clot formation in arteries."
+            summary = "Low-dose Aspirin prevents blood platelets from sticking together, which reduces the chance of clot formation in arteries.",
+            manufacturer = "Bayer / USV / Micro Labs",
+            alternatives = listOf("Clopidogrel 75mg", "Prasugrel 10mg", "Ticagrelor 90mg")
         ))
         add(createMed(
             name = "Prednisolone 5mg",
@@ -217,7 +235,9 @@ object DailyMedicinesDatabase {
             rx = true,
             score = 7,
             level = SafetyLevel.CAUTION,
-            summary = "Prednisolone is an oral steroid that reduces severe inflammation and manages hyper-reactive immune responses."
+            summary = "Prednisolone is an oral steroid that reduces severe inflammation and manages hyper-reactive immune responses.",
+            manufacturer = "Pfizer / Zydus / Macleods",
+            alternatives = listOf("Methylprednisolone 4mg", "Dexamethasone 0.5mg", "Hydrocortisone 10mg", "Budesonide 3mg")
         ))
 
         // --- CAPSULES (10 items) ---
@@ -2164,7 +2184,9 @@ object DailyMedicinesDatabase {
         level: SafetyLevel,
         emergencyWarning: String? = null,
         summary: String,
-        typeOverride: MedicineType? = null
+        typeOverride: MedicineType? = null,
+        manufacturer: String = "",
+        alternatives: List<String> = emptyList()
     ): MedicineInfo {
         return MedicineInfo(
             id = "db_item_" + name.replace(" ", "_").lowercase(),
@@ -2192,7 +2214,9 @@ object DailyMedicinesDatabase {
             aiSummary = summary,
             storageInfo = "Store below 25°C in a dry place. Keep out of reach of children.",
             confidenceScore = 100,
-            disclaimer = "⚕️ Medical information is generated for educational purposes only. Always consult a certified doctor or pharmacist."
+            disclaimer = "⚕️ Medical information is generated for educational purposes only. Always consult a certified doctor or pharmacist.",
+            manufacturer = manufacturer,
+            alternatives = alternatives
         )
     }
 }

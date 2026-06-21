@@ -106,4 +106,50 @@ interface FirebaseRepository {
     ): Result<Unit>
 
     suspend fun trackModuleUsage(module: String)
+
+    // ── Conversation Management (ChatGPT-like) ─────────────────────────────
+
+    suspend fun createConversation(
+        uid: String,
+        title: String = "New Chat"
+    ): Result<String>
+
+    suspend fun getConversations(
+        uid: String,
+        limit: Long = 30,
+        lastTimestamp: Long? = null
+    ): Result<List<com.smartvision.ai.domain.model.Conversation>>
+
+    suspend fun getConversationMessages(
+        conversationId: String,
+        limit: Long = 50,
+        lastTimestamp: Long? = null
+    ): Result<List<com.smartvision.ai.domain.model.ConversationMessage>>
+
+    suspend fun saveConversationMessage(
+        conversationId: String,
+        message: com.smartvision.ai.domain.model.ConversationMessage
+    ): Result<Unit>
+
+    suspend fun updateConversationMeta(
+        conversationId: String,
+        title: String? = null,
+        lastMessage: String? = null,
+        messageCount: Int? = null
+    ): Result<Unit>
+
+    suspend fun deleteConversation(conversationId: String): Result<Unit>
+
+    suspend fun searchConversations(
+        uid: String,
+        query: String
+    ): Result<List<com.smartvision.ai.domain.model.Conversation>>
+
+    // ── In-App Feedback System ─────────────────────────────────────────────
+    suspend fun saveFeedback(feedback: com.smartvision.ai.domain.model.FeedbackEntry): Result<Unit>
+    suspend fun getUserFeedbackHistory(email: String): Result<List<com.smartvision.ai.domain.model.FeedbackEntry>>
+    suspend fun getAllFeedback(): Result<List<com.smartvision.ai.domain.model.FeedbackEntry>>
+    suspend fun updateFeedbackStatus(feedbackId: String, status: String): Result<Unit>
+    suspend fun updateFeedback(feedback: com.smartvision.ai.domain.model.FeedbackEntry): Result<Unit>
+    suspend fun deleteFeedback(feedbackId: String): Result<Unit>
 }

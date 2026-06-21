@@ -27,6 +27,7 @@ object Routes {
     const val WASTE_CLASSIFIER= "waste_classifier"
     const val WASTE_CLASSIFIER_V2 = "waste_classifier_v2"
     const val HISTORY         = "history"
+    const val HISTORY_DETAIL  = "history_detail/{historyId}"
     const val SETTINGS        = "settings"
     const val PROFILE         = "profile"
     const val ABOUT           = "about"
@@ -35,8 +36,16 @@ object Routes {
     const val ACCESSIBILITY    = "accessibility"
     const val NOTIFICATION_SETTINGS = "notification_settings"
     const val ADMIN_DASHBOARD = "admin_dashboard"
+    const val FEEDBACK        = "feedback"
+    const val ADMIN_FEEDBACK  = "admin_feedback"
+    const val CAREER_ASSISTANT = "career_assistant"
+    const val RESUME_BUILDER   = "resume_builder"
+    const val RESUME_ANALYZER  = "resume_analyzer"
+    const val COVER_LETTER     = "cover_letter"
+    const val INTERVIEW_PREP   = "interview_prep"
 
     fun ocrResult(text: String) = "ocr_result/$text"
+    fun historyDetail(id: Long) = "history_detail/$id"
 }
 
 // ─── Bottom Navigation Items — 4 tabs matching reference ─────────────────────

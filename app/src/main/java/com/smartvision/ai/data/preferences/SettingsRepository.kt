@@ -20,6 +20,7 @@ class SettingsRepository @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
     private val darkModeKey = booleanPreferencesKey("dark_mode")
+    private val themeModeKey = stringPreferencesKey("theme_mode")
     private val autoDeletePeriodKey = stringPreferencesKey("auto_delete_period")
     private val autoDeleteOcrKey = booleanPreferencesKey("auto_delete_ocr")
     private val autoDeleteHomeworkKey = booleanPreferencesKey("auto_delete_homework")
@@ -43,8 +44,13 @@ class SettingsRepository @Inject constructor(
     private val quietHoursStartKey = intPreferencesKey("quiet_hours_start")
     private val quietHoursEndKey = intPreferencesKey("quiet_hours_end")
 
+    val themeMode: Flow<String> = context.settingsStore.data.map { preferences ->
+        preferences[themeModeKey] ?: "NEON_DARK"
+    }
+
     val darkMode: Flow<Boolean> = context.settingsStore.data.map { preferences ->
-        preferences[darkModeKey] ?: true
+        val mode = preferences[themeModeKey] ?: "NEON_DARK"
+        mode != "LIGHT"
     }
 
     val autoDeletePeriod: Flow<String> = context.settingsStore.data.map { preferences ->
@@ -137,6 +143,10 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setDarkMode(enabled: Boolean) {
         context.settingsStore.edit { it[darkModeKey] = enabled }
+    }
+
+    suspend fun setThemeMode(mode: String) {
+        context.settingsStore.edit { it[themeModeKey] = mode }
     }
 
     suspend fun setAutoDeletePeriod(period: String) {

@@ -18,6 +18,7 @@ enum class QrContentType(
     PRODUCT  ("Product",        "🛍️", 0xFFBF5FFF, "View Info"),
     GEO      ("Location",       "📍", 0xFFFF073A, "Open Map"),
     CALENDAR ("Calendar Event", "📅", 0xFF00E5FF, "Add to Calendar"),
+    UPI      ("UPI Payment",    "💳", 0xFF00FF88, "Pay with UPI"),
     OTHER    ("Unknown",        "❓", 0xFF555555, "Copy")
 }
 

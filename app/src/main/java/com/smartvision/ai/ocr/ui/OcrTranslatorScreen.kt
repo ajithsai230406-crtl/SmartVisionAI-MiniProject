@@ -97,6 +97,7 @@ fun OcrTranslatorScreen(
     val ocrMode           by viewModel.ocrMode.collectAsStateWithLifecycle()
     val blockTranslations by viewModel.blockTranslations.collectAsStateWithLifecycle()
     val isTranslatingBlocks by viewModel.isTranslatingBlocks.collectAsStateWithLifecycle()
+    val targetLanguageCode  by viewModel.targetLanguageCode.collectAsStateWithLifecycle()
 
     var showSourcePicker by remember { mutableStateOf(false) }
 
@@ -119,9 +120,21 @@ fun OcrTranslatorScreen(
     }
 
     // Resizable viewfinder crop rect
+    var manualRectInitialized by remember { mutableStateOf(false) }
     var manualRect by remember { mutableStateOf(Rect(60f, 300f, 1020f, 1100f)) }
     var canvasWidth  by remember { mutableStateOf(1) }
     var canvasHeight by remember { mutableStateOf(1) }
+
+    LaunchedEffect(canvasWidth, canvasHeight) {
+        if (canvasWidth > 1 && canvasHeight > 1 && !manualRectInitialized) {
+            val w = canvasWidth * 0.82f
+            val h = canvasHeight * 0.38f
+            val l = (canvasWidth - w) / 2f
+            val t = (canvasHeight - h) / 2f
+            manualRect = Rect(l, t, l + w, t + h)
+            manualRectInitialized = true
+        }
+    }
 
     val activeState = scanState as? OcrScanState.TextDetected
     val frameW = activeState?.frameWidth  ?: 1080
@@ -198,7 +211,7 @@ fun OcrTranslatorScreen(
                     )
                 } else if (activeBlocks.isNotEmpty()) {
                     TextSelectorOverlay(
-                        blocks        = activeBlocks,
+                        blocks        = insideBlocks,
                         insideBlocks  = insideBlocks,
                         selectedBlock = selectedBlock,
                         frameWidth    = frameW,
@@ -263,7 +276,7 @@ fun OcrTranslatorScreen(
                     if (insideBlocks.isEmpty()) viewModel.showError("Point camera towards text")
                     else {
                         val bmp = previewViewRef.value?.bitmap
-                        viewModel.freezeAndCapture(bmp)
+                        viewModel.freezeAndCapture(bmp, insideBlocks)
                         viewModel.translateCurrentText()
                     }
                 }
@@ -289,6 +302,7 @@ fun OcrTranslatorScreen(
                     selectedParagraph = selectedParagraph,
                     translationState = translationState,
                     targetLanguage   = targetLanguage,
+                    targetLangCode   = targetLanguageCode,
                     languages        = viewModel.supportedLanguages,
                     activeTab        = activeTab,
                     scanHistory      = scanHistory,
@@ -297,7 +311,9 @@ fun OcrTranslatorScreen(
                     onTranslate      = { viewModel.translateCurrentText() },
                     onSpeak          = { text, lang -> viewModel.speak(text, lang) },
                     onLangChange     = { viewModel.setTargetLanguage(it) },
-                    onDeleteHistory  = { viewModel.deleteScanFromHistory(it) }
+                    onSpeakOriginal  = { viewModel.speakOriginalText() },
+                    onDeleteHistory  = { viewModel.deleteScanFromHistory(it) },
+                    onResume         = { viewModel.resumeLiveScan() }
                 )
             }
         }
@@ -311,13 +327,15 @@ fun OcrTranslatorScreen(
             )
         }
         // ── Mode Selector ────────────────────────────────────────────────────
-        OcrModeSelector(
-            activeMode   = ocrMode,
-            onModeChange = { viewModel.setOcrMode(it) },
-            modifier     = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = if (isLiveScan) 130.dp else 370.dp)
-        )
+        if (isLiveScan) {
+            OcrModeSelector(
+                activeMode   = ocrMode,
+                onModeChange = { viewModel.setOcrMode(it) },
+                modifier     = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 130.dp)
+            )
+        }
 
         // ── Source Language Picker Sheet ─────────────────────────────────────
         AnimatedVisibility(
@@ -477,6 +495,13 @@ private fun ResizableSelectorViewfinder(
                 cornerRadius = CornerRadius(18.dp.toPx()),
                 style        = Stroke(width = 2.dp.toPx())
             )
+
+            // Visible handle circles
+            val handleRadius = 6.dp.toPx()
+            drawCircle(NeonBlueExact, handleRadius, rect.topLeft)
+            drawCircle(NeonBlueExact, handleRadius, rect.topRight)
+            drawCircle(NeonBlueExact, handleRadius, rect.bottomLeft)
+            drawCircle(NeonBlueExact, handleRadius, rect.bottomRight)
 
             // Corner accent marks
             val cLen = 22.dp.toPx(); val cStr = 3.5f
@@ -896,6 +921,7 @@ private fun OcrBottomPanel(
     selectedParagraph: RecognizedParagraph?,
     translationState: TranslationState,
     targetLanguage:   String,
+    targetLangCode:   String,
     languages:        List<String>,
     activeTab:        Int,
     scanHistory:      List<OcrScanEntity>,
@@ -904,7 +930,9 @@ private fun OcrBottomPanel(
     onTranslate:      () -> Unit,
     onSpeak:          (String, String) -> Unit,
     onLangChange:     (String) -> Unit,
-    onDeleteHistory:  (String) -> Unit
+    onSpeakOriginal:  () -> Unit,
+    onDeleteHistory:  (String) -> Unit,
+    onResume:         () -> Unit
 ) {
     val ctx = LocalContext.current
     val pagerState = rememberPagerState(initialPage = activeTab) { 3 }
@@ -915,9 +943,25 @@ private fun OcrBottomPanel(
     }
     LaunchedEffect(pagerState.currentPage) { onTabChange(pagerState.currentPage) }
 
+    var isDragging by remember { mutableStateOf(false) }
+    var dragOffsetY by remember { mutableStateOf(0f) }
+
+    val density = LocalDensity.current
+    val thresholdPx = remember { with(density) { 100.dp.toPx() } }
+
+    val animatedOffset by animateFloatAsState(
+        targetValue = if (isDragging) dragOffsetY else 0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "sheetOffset"
+    )
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .offset { IntOffset(0, animatedOffset.toInt()) }
             .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
             .background(Brush.verticalGradient(listOf(Color(0xDC060D1F), Color(0xF502040A))))
             .border(
@@ -927,69 +971,95 @@ private fun OcrBottomPanel(
             )
             .navigationBarsPadding()
     ) {
-        // Drag handle
-        Box(
-            modifier = Modifier
-                .padding(top = 12.dp)
-                .width(44.dp)
-                .height(4.dp)
-                .clip(CircleShape)
-                .background(NeonBlueExact.copy(0.4f))
-                .align(Alignment.CenterHorizontally)
-        )
-        Spacer(Modifier.height(10.dp))
-
-        // Language badge + stats row
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                DetectedLangBadge(result.detectedLanguageName)
-                if (result.detectedScript.isNotBlank()) {
-                    NeonBadge(result.detectedScript, NeonCyan)
-                }
-                if (result.hasRotatedText) NeonBadge("Rotated", NeonOrange)
-            }
-            Text(
-                "${result.paragraphs.size} para · ${result.blocks.size} lines",
-                style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary
-            )
-        }
-        Spacer(Modifier.height(10.dp))
-
-        // Tab bar
-        Row(
+        // Drag header container (large pull-down target)
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 18.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(Color.White.copy(0.05f))
-                .border(1.dp, Color.White.copy(0.08f), RoundedCornerShape(14.dp))
-                .padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            listOf("📄 Text", "🌐 Translate", "🕐 History").forEachIndexed { i, label ->
-                val sel = pagerState.currentPage == i
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(if (sel) Brush.horizontalGradient(listOf(NeonBlueExact.copy(0.25f), NeonPurple.copy(0.2f))) else Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent)))
-                        .border(if (sel) 1.dp else 0.dp, if (sel) NeonBlueExact.copy(0.4f) else Color.Transparent, RoundedCornerShape(10.dp))
-                        .clickable { scope.launch { pagerState.animateScrollToPage(i) } }
-                        .padding(vertical = 8.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        label,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (sel) Color.White else TextSecondary,
-                        fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal,
-                        fontSize = 10.5.sp
+                .pointerInput(Unit) {
+                    detectDragGestures(
+                        onDragStart = { isDragging = true },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            dragOffsetY = (dragOffsetY + dragAmount.y).coerceAtLeast(0f)
+                        },
+                        onDragEnd = {
+                            isDragging = false
+                            if (dragOffsetY > thresholdPx) {
+                                onResume()
+                            }
+                            dragOffsetY = 0f
+                        },
+                        onDragCancel = {
+                            isDragging = false
+                            dragOffsetY = 0f
+                        }
                     )
+                }
+        ) {
+            // Drag handle
+            Box(
+                modifier = Modifier
+                    .padding(top = 12.dp)
+                    .width(44.dp)
+                    .height(4.dp)
+                    .clip(CircleShape)
+                    .background(NeonBlueExact.copy(0.4f))
+                    .align(Alignment.CenterHorizontally)
+            )
+            Spacer(Modifier.height(10.dp))
+
+            // Language badge + stats row
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    DetectedLangBadge(result.detectedLanguageName)
+                    if (result.detectedScript.isNotBlank()) {
+                        NeonBadge(result.detectedScript, NeonCyan)
+                    }
+                    if (result.hasRotatedText) NeonBadge("Rotated", NeonOrange)
+                }
+                Text(
+                    "${result.paragraphs.size} para · ${result.blocks.size} lines",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondary
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+
+            // Tab bar
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color.White.copy(0.05f))
+                    .border(1.dp, Color.White.copy(0.08f), RoundedCornerShape(14.dp))
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                listOf("📄 Text", "🌐 Translate", "🕐 History").forEachIndexed { i, label ->
+                    val sel = pagerState.currentPage == i
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (sel) Brush.horizontalGradient(listOf(NeonBlueExact.copy(0.25f), NeonPurple.copy(0.2f))) else Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent)))
+                            .border(if (sel) 1.dp else 0.dp, if (sel) NeonBlueExact.copy(0.4f) else Color.Transparent, RoundedCornerShape(10.dp))
+                            .clickable { scope.launch { pagerState.animateScrollToPage(i) } }
+                            .padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (sel) Color.White else TextSecondary,
+                            fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal,
+                            fontSize = 10.5.sp
+                        )
+                    }
                 }
             }
         }
@@ -1014,11 +1084,13 @@ private fun OcrBottomPanel(
                 1 -> TranslateTab(
                     translationState = translationState,
                     targetLanguage   = targetLanguage,
+                    targetLangCode   = targetLangCode,
                     languages        = languages,
                     detectedLangCode = result.detectedLanguage,
                     onTranslate      = onTranslate,
                     onLangChange     = onLangChange,
                     onSpeak          = onSpeak,
+                    onSpeakOriginal  = onSpeakOriginal,
                     modifier         = Modifier.padding(horizontal = 18.dp)
                 )
                 2 -> HistoryTab(
@@ -1118,11 +1190,13 @@ private fun TextTab(
 private fun TranslateTab(
     translationState: TranslationState,
     targetLanguage:   String,
+    targetLangCode:   String,
     languages:        List<String>,
     detectedLangCode: String,
     onTranslate:      () -> Unit,
     onLangChange:     (String) -> Unit,
     onSpeak:          (String, String) -> Unit,
+    onSpeakOriginal:  () -> Unit,
     modifier:         Modifier
 ) {
     val ctx = LocalContext.current
@@ -1139,13 +1213,23 @@ private fun TranslateTab(
                 onChange  = onLangChange,
                 modifier  = Modifier.weight(1f)
             )
+            // Speak original extracted text
             Box(
                 modifier = Modifier
-                    .height(48.dp)
-                    .clip(RoundedCornerShape(24.dp))
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(NeonBlueExact.copy(0.10f))
+                    .border(1.5.dp, NeonBlueExact.copy(0.35f), CircleShape)
+                    .clickable(onClick = onSpeakOriginal),
+                contentAlignment = Alignment.Center
+            ) { Text("🔊", fontSize = 16.sp) }
+            Box(
+                modifier = Modifier
+                    .height(44.dp)
+                    .clip(RoundedCornerShape(22.dp))
                     .background(Brush.horizontalGradient(listOf(NeonBlueExact, NeonPurple)))
                     .clickable(onClick = onTranslate)
-                    .padding(horizontal = 20.dp),
+                    .padding(horizontal = 18.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text("Translate", style = MaterialTheme.typography.titleSmall, color = Color.White, fontWeight = FontWeight.Bold)
@@ -1161,7 +1245,7 @@ private fun TranslateTab(
         ) {
             TranslationResultCard(
                 state   = translationState,
-                onSpeak = onSpeak,
+                onSpeak = { text, _ -> onSpeak(text, targetLangCode) },
                 onCopy  = { copyToClipboard(ctx, it) },
                 onShare = { shareText(ctx, it) },
                 onSave  = { text ->
@@ -1332,12 +1416,43 @@ private fun TranslationResultCard(
                         lineHeight = 24.sp
                     )
 
-                    // AI Semantic / native meaning
+                    // Meaning in Source Language
+                    state.nativeMeaning?.let { m ->
+                        Spacer(Modifier.height(10.dp))
+                        HorizontalDivider(color = NeonBlueExact.copy(0.10f))
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Text("💡", fontSize = 12.sp)
+                            Text("Meaning in ${state.sourceLang}:", style = MaterialTheme.typography.labelSmall, color = NeonBlueExact, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(m, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f), lineHeight = 18.sp)
+                    }
+
+                    // Meaning in Target Language (new)
+                    state.meaningInTarget?.let { m ->
+                        Spacer(Modifier.height(10.dp))
+                        HorizontalDivider(color = NeonCyan.copy(0.10f))
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Text("🎯", fontSize = 12.sp)
+                            Text("Meaning in ${state.targetLang}:", style = MaterialTheme.typography.labelSmall, color = NeonCyan, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(m, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f), lineHeight = 18.sp)
+                    }
+
+                    // AI Semantic Breakdown
                     state.semanticMeaning?.let { meaning ->
                         Spacer(Modifier.height(10.dp))
                         HorizontalDivider(color = Color.White.copy(0.10f))
                         Spacer(Modifier.height(8.dp))
-                        SemanticMeaningCard(meaning = meaning, sourceLangName = state.sourceLang, targetLangName = state.targetLang)
+                        SemanticMeaningCard(
+                            meaning            = meaning,
+                            sourceLangName     = state.sourceLang,
+                            targetLangName     = state.targetLang,
+                            targetLangMeaning  = state.meaningInTarget ?: meaning.meaningInTarget
+                        )
                     } ?: state.nativeMeaning?.let { m ->
                         Spacer(Modifier.height(10.dp))
                         HorizontalDivider(color = Color.White.copy(0.10f))

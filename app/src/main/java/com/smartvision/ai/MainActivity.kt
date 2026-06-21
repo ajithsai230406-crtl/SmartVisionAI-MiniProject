@@ -31,7 +31,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             android.util.Log.d("SmartVision_Main", "setContent composition started")
             val scope = rememberCoroutineScope()
-            val darkMode by settingsRepository.darkMode.collectAsState(initial = true)
+            val themeMode by settingsRepository.themeMode.collectAsState(initial = "NEON_DARK")
             val fontSizeSetting by settingsRepository.fontSize.collectAsState(initial = 1)
             val highContrast by settingsRepository.highContrast.collectAsState(initial = false)
             val colorblindMode by settingsRepository.colorblindMode.collectAsState(initial = "NONE")
@@ -48,7 +48,7 @@ class MainActivity : ComponentActivity() {
             }
 
             SmartVisionTheme(
-                darkTheme = darkMode,
+                themeMode = themeMode,
                 fontSizeMultiplier = fontSizeMultiplier,
                 highContrast = highContrast,
                 colorblindMode = colorblindMode,
@@ -57,10 +57,10 @@ class MainActivity : ComponentActivity() {
                 aiVoiceGuidance = aiVoiceGuidance
             ) {
                 SmartVisionNavHost(
-                    isDarkTheme = darkMode,
-                    onThemeToggle = {
+                    themeMode = themeMode,
+                    onThemeSelect = { mode ->
                         scope.launch {
-                            settingsRepository.setDarkMode(!darkMode)
+                            settingsRepository.setThemeMode(mode)
                         }
                     }
                 )

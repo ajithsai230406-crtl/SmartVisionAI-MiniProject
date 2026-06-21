@@ -23,12 +23,13 @@ import java.util.Locale
 @Composable
 fun HistoryScreen(
     onBack: () -> Unit,
+    onNavigateToDetail: (Long) -> Unit = {},
     viewModel: HistoryViewModel = hiltViewModel()
 ) {
     val ext     = MaterialTheme.extended
     val items   by viewModel.history.collectAsStateWithLifecycle()
     var filter  by remember { mutableStateOf("All") }
-    val filters = listOf("All", "OCR", "Translation", "Chat", "Waste", "Medicine", "QR Scan", "Document", "Object")
+    val filters = listOf("All", "OCR", "Translation", "Chat", "Waste", "Medicine", "QR Scan", "Document", "Object", "Student")
     val fmt     = SimpleDateFormat("dd MMM, HH:mm", Locale.getDefault())
     val ctx     = LocalContext.current
 
@@ -43,6 +44,7 @@ fun HistoryScreen(
             "QR Scan" -> item.type == "QR Scan" || item.type == "QR"
             "Document" -> item.type == "Document"
             "Object" -> item.type == "Object"
+            "Student" -> item.type == "Student"
             else -> false
         }
     }
@@ -151,9 +153,9 @@ fun HistoryScreen(
                             "ChatUser", "ChatBot" -> AccentAI
                             "Waste"    -> AccentWaste
                             "Medicine" -> AccentMedicine
-                            "QR Scan", "QR" -> AccentQR
                             "Object"   -> AccentObject
                             "Document" -> AccentDocument
+                            "Career"   -> AccentCareer
                             else       -> NeonBlue
                         }
                         val emoji = when (item.type) {
@@ -164,9 +166,9 @@ fun HistoryScreen(
                             "ChatBot"  -> "🤖"
                             "Waste"    -> "♻️"
                             "Medicine" -> "💊"
-                            "QR Scan", "QR" -> "🔍"
                             "Object"   -> "👁️"
                             "Document" -> "📄"
+                            "Career"   -> "💼"
                             else       -> "📜"
                         }
                         val isChat = item.type == "ChatUser" || item.type == "ChatBot"
@@ -176,12 +178,14 @@ fun HistoryScreen(
                             else       -> item.title
                         }
                         val detailsText = if (isChat) item.title else item.details
+                        val hasDetailJson = item.detailsJson.isNotBlank()
 
                         Row(
                             modifier = Modifier.fillMaxWidth()
                                 .clip(RoundedCornerShape(14.dp))
                                 .background(ext.glassCard)
                                 .border(1.dp, accent.copy(0.2f), RoundedCornerShape(14.dp))
+                                .clickable(enabled = hasDetailJson) { onNavigateToDetail(item.id) }
                                 .padding(14.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -207,11 +211,20 @@ fun HistoryScreen(
                                 )
                             }
                             Spacer(Modifier.width(8.dp))
-                            Text(
-                                text = fmt.format(java.util.Date(item.createdAt)),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = ext.textHint
-                            )
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(
+                                    text = fmt.format(java.util.Date(item.createdAt)),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = ext.textHint
+                                )
+                                if (hasDetailJson) {
+                                    Text(
+                                        text = "Tap to view ›",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = accent.copy(alpha = 0.7f)
+                                    )
+                                }
+                            }
                         }
                     }
                 }

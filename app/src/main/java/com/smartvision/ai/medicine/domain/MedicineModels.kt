@@ -47,7 +47,10 @@ data class MedicineInfo(
     val rawOcrText:          String  = "",
     val confidenceScore:     Int     = 100,
     val sideEffectSeverities:Map<String, String> = emptyMap(),
-    val interactionWarnings: List<String> = emptyList()
+    val interactionWarnings: List<String> = emptyList(),
+    // Manufacturer & Alternatives
+    val manufacturer:        String  = "",
+    val alternatives:        List<String> = emptyList()
 )
 
 enum class MedicineType(val label: String, val emoji: String) {
@@ -70,6 +73,7 @@ sealed class MedicineScanState {
     data class OcrRunning(val progress: Float = 0.3f) : MedicineScanState()
     data class AiAnalyzing(val progress: Float = 0.7f) : MedicineScanState()
     data class Result(val info: MedicineInfo) : MedicineScanState()
+    data class NotMedicine(val message: String = "No medicine or supported product detected. Please scan a medicine package label.") : MedicineScanState()
     data class Error(val message: String, val canRetry: Boolean = true) : MedicineScanState()
 }
 
@@ -101,7 +105,9 @@ data class GenericDrugTemplate(
     val safetyScore: Int,
     val safetyLevel: SafetyLevel,
     val emergencyWarning: String? = null,
-    val aiSummary: String
+    val aiSummary: String,
+    val manufacturer: String = "",
+    val alternatives: List<String> = emptyList()
 )
 
 object MedicineDatabase {
@@ -430,7 +436,9 @@ object MedicineDatabase {
             safetyLevel = t.safetyLevel,
             emergencyWarning = t.emergencyWarning,
             aiSummary = t.aiSummary,
-            confidenceScore = 100
+            confidenceScore = 100,
+            manufacturer = t.manufacturer,
+            alternatives = t.alternatives
         )
     }
 
@@ -476,6 +484,9 @@ object MedicineDatabase {
 
     fun searchAll(query: String): List<MedicineInfo> = medicines.filter {
         it.name.contains(query, true) || it.genericName.contains(query, true) ||
-        it.brandName.contains(query, true) || it.category.contains(query, true)
+        it.brandName.contains(query, true) || it.category.contains(query, true) ||
+        it.manufacturer.contains(query, true) ||
+        it.uses.any { u -> u.contains(query, true) } ||
+        it.symptomsItTreats.any { s -> s.contains(query, true) }
     }
 }

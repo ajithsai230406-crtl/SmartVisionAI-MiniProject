@@ -40,8 +40,14 @@ class SettingsViewModel @Inject constructor(
     val quietHoursStart = settingsRepository.quietHoursStart.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 22)
     val quietHoursEnd = settingsRepository.quietHoursEnd.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 8)
 
+    val themeMode = settingsRepository.themeMode.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "NEON_DARK")
+
     fun setDarkMode(enabled: Boolean) = viewModelScope.launch {
         settingsRepository.setDarkMode(enabled)
+    }
+
+    fun setThemeMode(mode: String) = viewModelScope.launch {
+        settingsRepository.setThemeMode(mode)
     }
 
     fun setAutoDeletePeriod(period: String) = viewModelScope.launch {

@@ -19,37 +19,99 @@ import androidx.compose.ui.unit.*
 import com.smartvision.ai.ui.theme.*
 
 // ─── GradientBackground ───────────────────────────────────────────────────────
+data class MovingParticle(
+    val xSeed: Float,
+    val ySeed: Float,
+    val size: Float,
+    val speedX: Float,
+    val speedY: Float
+)
+
 @Composable
 fun GradientBackground(
     modifier: Modifier = Modifier,
     content: @Composable BoxScope.() -> Unit
 ) {
     val ext = MaterialTheme.extended
+    val themeMode = ext.themeMode
+
+    val brush = when (themeMode) {
+        "PURE_BLACK" -> Brush.verticalGradient(
+            colors = listOf(Color(0xFF000000), Color(0xFF000000))
+        )
+        "LIGHT" -> Brush.verticalGradient(
+            colors = listOf(
+                Color(0xFFFFFFFF),
+                Color(0xFFF3F7FF)
+            )
+        )
+        else -> Brush.radialGradient(
+            colors = listOf(
+                Color(0xFF0C1840),
+                DeepNavy,
+                Color(0xFF020510)
+            ),
+            center = Offset.Unspecified,
+            radius = 1600f
+        )
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(
-                brush = if (ext.isDark) {
-                    Brush.radialGradient(
-                        colors = listOf(
-                            Color(0xFF0C1840),
-                            DeepNavy,
-                            Color(0xFF020510)
-                        ),
-                        center = Offset.Unspecified,
-                        radius = 1600f
-                    )
-                } else {
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            Color(0xFFFFFFFF),
-                            Color(0xFFF3F7FF)
-                        )
+            .background(brush)
+    ) {
+        if (themeMode == "NEON_DARK") {
+            val infiniteTransition = rememberInfiniteTransition(label = "particles")
+            val time by infiniteTransition.animateFloat(
+                initialValue = 0f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(15000, easing = LinearEasing),
+                    repeatMode = RepeatMode.Restart
+                ),
+                label = "time"
+            )
+
+            val particles = remember {
+                List(25) {
+                    MovingParticle(
+                        xSeed = Math.random().toFloat(),
+                        ySeed = Math.random().toFloat(),
+                        size = (2..5).random().toFloat(),
+                        speedX = -0.03f + kotlin.random.Random.nextFloat() * 0.06f,
+                        speedY = 0.01f + kotlin.random.Random.nextFloat() * 0.03f
                     )
                 }
-            ),
-        content = content
-    )
+            }
+
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val width = size.width
+                val height = size.height
+                particles.forEach { p ->
+                    val x = (p.xSeed + p.speedX * time * 10f) % 1.0f
+                    val y = (p.ySeed - p.speedY * time * 10f) % 1.0f
+                    
+                    val posX = if (x < 0) (x + 1f) * width else x * width
+                    val posY = if (y < 0) (y + 1f) * height else y * height
+                    
+                    val alpha = 0.12f + 0.08f * kotlin.math.sin(time * 2 * Math.PI.toFloat() + p.xSeed * 10f)
+                    
+                    drawCircle(
+                        color = Color(0xFF00D9FF),
+                        radius = p.size,
+                        center = Offset(posX, posY),
+                        alpha = alpha.coerceIn(0f, 1f)
+                    )
+                }
+            }
+        }
+
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            content = content
+        )
+    }
 }
 
 // ─── GlassCard ────────────────────────────────────────────────────────────────
@@ -771,6 +833,7 @@ fun SemanticMeaningCard(
     meaning: com.smartvision.ai.translator.domain.SemanticMeaning,
     sourceLangName: String,
     targetLangName: String,
+    targetLangMeaning: String? = meaning.meaningInTarget,
     modifier: Modifier = Modifier
 ) {
     val ext = MaterialTheme.extended
@@ -870,6 +933,22 @@ fun SemanticMeaningCard(
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f),
                     lineHeight = 20.sp
                 )
+            }
+
+            // Meaning in Target Language (new)
+            if (!targetLangMeaning.isNullOrBlank()) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("🎯", fontSize = 12.sp)
+                        Text("Meaning in $targetLangName:", style = MaterialTheme.typography.labelSmall, color = NeonCyan.copy(0.9f), fontWeight = FontWeight.Bold)
+                    }
+                    Text(
+                        text = targetLangMeaning,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f),
+                        lineHeight = 20.sp
+                    )
+                }
             }
 
             // Contextual explanation

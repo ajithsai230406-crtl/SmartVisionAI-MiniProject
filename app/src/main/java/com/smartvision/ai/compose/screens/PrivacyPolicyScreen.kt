@@ -83,7 +83,7 @@ fun PrivacyPolicyScreen(onBack: () -> Unit) {
                         "We believe privacy is a fundamental human right. Smart Vision AI is built from the ground up to operate securely. " +
                                 "Most analyses run directly on your device, and any cloud interactions are encrypted end-to-end to protect your personal space.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White.copy(0.9f),
+                        color = MaterialTheme.colorScheme.onSurface,
                         lineHeight = 20.sp
                     )
                 }
@@ -96,7 +96,7 @@ fun PrivacyPolicyScreen(onBack: () -> Unit) {
                                 "• Personal Details: We do not compile, sell, or monetize your images. Your vision feeds are exclusively your own.\n" +
                                 "• Diagnostics: Anonymous technical logs may be collected only with your explicit consent.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White.copy(0.9f),
+                        color = MaterialTheme.colorScheme.onSurface,
                         lineHeight = 20.sp
                     )
                 }
@@ -108,7 +108,7 @@ fun PrivacyPolicyScreen(onBack: () -> Unit) {
                                 "Waste Classifier, Homework Helper, and Barcode scan views. Camera frames are analyzed locally in temporary buffers and are never recorded without consent.\n" +
                                 "• Storage Permission: Required to import gallery screenshots for QR, homework, and OCR extraction. Also utilized by the Document Scanner to export processed PDF/JPEG copies to public directories safely under modern Android Scoped Storage compatibility.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White.copy(0.9f),
+                        color = MaterialTheme.colorScheme.onSurface,
                         lineHeight = 20.sp
                     )
                 }
@@ -120,7 +120,7 @@ fun PrivacyPolicyScreen(onBack: () -> Unit) {
                                 "Extracted text is processed locally or translated using secure translation APIs. Your printed sheets, notes, " +
                                 "and captured documents are never shared or stored externally.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White.copy(0.9f),
+                        color = MaterialTheme.colorScheme.onSurface,
                         lineHeight = 20.sp
                     )
                 }
@@ -132,7 +132,7 @@ fun PrivacyPolicyScreen(onBack: () -> Unit) {
                                 "Your inputs are processed safely in compliance with enterprise data privacy directives. " +
                                 "No undesirable, illegal, or erotic image processing is supported or allowed.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White.copy(0.9f),
+                        color = MaterialTheme.colorScheme.onSurface,
                         lineHeight = 20.sp
                     )
                 }
@@ -144,7 +144,7 @@ fun PrivacyPolicyScreen(onBack: () -> Unit) {
                                 "It does not constitute medical advice or prescriptions. Always verify chemical compounds, dosages, and " +
                                 "safety instructions with a licensed medical practitioner or certified pharmacist before use.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White.copy(0.9f),
+                        color = MaterialTheme.colorScheme.onSurface,
                         lineHeight = 20.sp
                     )
                 }
@@ -156,7 +156,7 @@ fun PrivacyPolicyScreen(onBack: () -> Unit) {
                                 "These explanations are for learning and educational utility only. Users are responsible for validating " +
                                 "formula derivations and steps independently to ensure academic integrity.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White.copy(0.9f),
+                        color = MaterialTheme.colorScheme.onSurface,
                         lineHeight = 20.sp
                     )
                 }
@@ -168,7 +168,7 @@ fun PrivacyPolicyScreen(onBack: () -> Unit) {
                                 "violent, highly illegal, or otherwise undesirable visual content is strictly prohibited. Violators will have " +
                                 "their accounts suspended immediately.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White.copy(0.9f),
+                        color = MaterialTheme.colorScheme.onSurface,
                         lineHeight = 20.sp
                     )
                 }

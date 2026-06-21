@@ -1,11 +1,16 @@
 package com.smartvision.ai.translator.presentation
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.net.Uri
 import android.speech.tts.TextToSpeech
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.smartvision.ai.data.ScreenContext
+import com.smartvision.ai.data.ScreenContextManager
 import com.smartvision.ai.data.repository.HistoryRepository
 import com.smartvision.ai.data.repository.FirebaseRepository
+import com.smartvision.ai.ocr.data.OcrRecognitionRepository
 import com.smartvision.ai.translator.data.SmartTranslatorRepository
 import com.smartvision.ai.translator.domain.*
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -20,6 +25,8 @@ class TextTranslatorViewModel @Inject constructor(
     private val repo:        SmartTranslatorRepository,
     private val historyRepo: HistoryRepository,
     private val firebaseRepository: FirebaseRepository,
+    private val ocrRepo:     OcrRecognitionRepository,
+    private val screenContextManager: ScreenContextManager,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -48,6 +55,10 @@ class TextTranslatorViewModel @Inject constructor(
     private val _isAutoDetect   = MutableStateFlow(true)
     val isAutoDetect: StateFlow<Boolean> = _isAutoDetect.asStateFlow()
 
+    // ── OCR image-to-text state ────────────────────────────────────────────────
+    private val _ocrInputState = MutableStateFlow<OcrInputState>(OcrInputState.Idle)
+    val ocrInputState: StateFlow<OcrInputState> = _ocrInputState.asStateFlow()
+
     // ── TTS ────────────────────────────────────────────────────────────────────
     private var tts: TextToSpeech? = null
 
@@ -68,7 +79,6 @@ class TextTranslatorViewModel @Inject constructor(
     fun swapLanguages() {
         val src = _sourceLang.value; val tgt = _targetLang.value
         _sourceLang.value = tgt; _targetLang.value = src
-        // Swap the text too if we have a translation
         val cur = (_state.value as? TranslatorState.Success)?.result
         if (cur != null) { _inputText.value = cur.translatedText; translateCurrent() }
     }
@@ -87,8 +97,34 @@ class TextTranslatorViewModel @Inject constructor(
                 .onSuccess { result ->
                     _state.value = TranslatorState.Success(result)
                     _sourceLang.value = result.detectedLang
+                    // Emit context for floating AI assistant
+                    screenContextManager.updateContext(
+                        ScreenContext.TranslatorContext(
+                            sourceText = result.originalText,
+                            translatedText = result.translatedText,
+                            sourceLang = result.detectedLang.displayName,
+                            targetLang = result.targetLang.displayName,
+                            semanticBreakdown = result.semanticMeaning?.contextExplanation ?: ""
+                        ),
+                        moduleName = "Smart Translator"
+                    )
                     _recentTranslations.update { (listOf(result) + it).take(15) }
-                    historyRepo.save("Translation", "${result.detectedLang.flag} → ${result.targetLang.flag} ${result.translatedText.take(60)}", result.originalText.take(200))
+                    val histJson = com.smartvision.ai.domain.model.HistoryJsonSerializer.serializeTranslation(
+                        com.smartvision.ai.domain.model.TranslationHistoryDetail(
+                            originalText = result.originalText,
+                            translatedText = result.translatedText,
+                            sourceLang = result.detectedLang.displayName,
+                            targetLang = result.targetLang.displayName,
+                            meaningInSource = result.nativeMeaning,
+                            meaningInTarget = result.meaningInTarget,
+                            meaningInEnglish = result.semanticMeaning?.meaningEnglish,
+                            context = result.semanticMeaning?.contextExplanation,
+                            usageExamples = result.semanticMeaning?.usageExplanation?.let { listOf(it) } ?: emptyList(),
+                            alternativeMeanings = emptyList(),
+                            pronunciation = result.pronunciation ?: result.semanticMeaning?.pronunciation
+                        )
+                    )
+                    historyRepo.save("Translation", "${result.detectedLang.flag} → ${result.targetLang.flag} ${result.translatedText.take(60)}", result.originalText.take(200), histJson)
                     viewModelScope.launch {
                         firebaseRepository.saveTranslation(
                             sourceText = result.originalText,
@@ -97,12 +133,62 @@ class TextTranslatorViewModel @Inject constructor(
                             targetLang = result.targetLang.displayName
                         )
                     }
-                    // Auto-fetch explanation
                     fetchExplanation(result)
                 }
                 .onFailure { _state.value = TranslatorState.Error(it.message ?: "Translation failed") }
         }
     }
+
+    // ── OCR: Gallery image → text ──────────────────────────────────────────────
+    fun analyzeImageUri(uri: Uri) {
+        viewModelScope.launch {
+            _ocrInputState.value = OcrInputState.Processing
+            runCatching {
+                val bitmap = android.graphics.BitmapFactory.decodeStream(
+                    context.contentResolver.openInputStream(uri)
+                ) ?: throw IllegalArgumentException("Could not decode image")
+                ocrRepo.recognizeAutoScriptFromBitmap(bitmap)
+            }.mapCatching { it.getOrThrow() }
+                .onSuccess { mlText ->
+                    val text = mlText.text.trim()
+                    if (text.isBlank()) {
+                        _ocrInputState.value = OcrInputState.Error("No text found in image")
+                    } else {
+                        _inputText.value = text
+                        _ocrInputState.value = OcrInputState.Success(text)
+                        _isAutoDetect.value  = true
+                        translate(text)
+                    }
+                }
+                .onFailure {
+                    _ocrInputState.value = OcrInputState.Error(it.message ?: "Image text extraction failed")
+                }
+        }
+    }
+
+    // ── OCR: Camera bitmap → text ──────────────────────────────────────────────
+    fun analyzeImageBitmap(bitmap: Bitmap) {
+        viewModelScope.launch {
+            _ocrInputState.value = OcrInputState.Processing
+            ocrRepo.recognizeAutoScriptFromBitmap(bitmap)
+                .onSuccess { mlText ->
+                    val text = mlText.text.trim()
+                    if (text.isBlank()) {
+                        _ocrInputState.value = OcrInputState.Error("No text found in image")
+                    } else {
+                        _inputText.value = text
+                        _ocrInputState.value = OcrInputState.Success(text)
+                        _isAutoDetect.value  = true
+                        translate(text)
+                    }
+                }
+                .onFailure {
+                    _ocrInputState.value = OcrInputState.Error(it.message ?: "Camera text extraction failed")
+                }
+        }
+    }
+
+    fun dismissOcrState() { _ocrInputState.value = OcrInputState.Idle }
 
     fun speakOriginal() {
         val text = _inputText.value.ifBlank { return }
@@ -118,7 +204,8 @@ class TextTranslatorViewModel @Inject constructor(
         (_state.value as? TranslatorState.Success)?.result?.translatedText ?: ""
 
     fun clearAll() {
-        _inputText.value = ""; _state.value = TranslatorState.Idle; _explanation.value = null
+        _inputText.value = ""; _state.value = TranslatorState.Idle
+        _explanation.value = null; _ocrInputState.value = OcrInputState.Idle
     }
 
     private fun translateCurrent() {

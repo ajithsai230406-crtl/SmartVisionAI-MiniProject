@@ -25,10 +25,10 @@ class HistoryRepository @Inject constructor(
         return dao.observeHistory(userId).map { rows -> rows.map { it.toDomain() } }
     }
 
-    suspend fun save(type: String, title: String, details: String) {
+    suspend fun save(type: String, title: String, details: String, detailsJson: String = "") {
         val createdAt = System.currentTimeMillis()
         val userId = auth.currentUser?.uid ?: "guest_uid"
-        dao.insert(HistoryRecord(type = type, title = title, details = details, createdAt = createdAt).toEntity(userId))
+        dao.insert(HistoryRecord(type = type, title = title, details = details, createdAt = createdAt, detailsJson = detailsJson).toEntity(userId))
 
         if (userId != "guest_uid") {
             try {
@@ -182,5 +182,9 @@ class HistoryRepository @Inject constructor(
     suspend fun deleteByTypesOlderThan(types: List<String>, timestamp: Long) {
         val userId = auth.currentUser?.uid ?: "guest_uid"
         dao.deleteByTypesOlderThan(types, timestamp, userId)
+    }
+
+    suspend fun getById(id: Long): HistoryRecord? {
+        return dao.getById(id)?.toDomain()
     }
 }

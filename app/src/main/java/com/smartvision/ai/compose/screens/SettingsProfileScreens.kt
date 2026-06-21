@@ -47,8 +47,8 @@ import com.smartvision.ai.R
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
-    isDarkTheme: Boolean,
-    onThemeToggle: () -> Unit,
+    themeMode: String,
+    onThemeSelect: (String) -> Unit,
     onNavigate: (String) -> Unit,
     onLogout: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
@@ -105,6 +105,7 @@ fun SettingsScreen(
                         .clip(RoundedCornerShape(16.dp))
                         .background(ext.glassCard)
                         .border(1.dp, ext.glassBorder, RoundedCornerShape(16.dp))
+                        .clickable { onNavigate(com.smartvision.ai.compose.navigation.Routes.PROFILE) }
                         .padding(16.dp)
                 ) {
                     Row(
@@ -150,7 +151,7 @@ fun SettingsScreen(
                 }
 
                 SettingsSection("🎨 Appearance")
-                ThemeToggleCard(isDarkTheme = isDarkTheme, onToggle = onThemeToggle)
+                ThemeDropdownCard(themeMode = themeMode, onThemeSelect = onThemeSelect)
                 FontSizeCard(selected = fontSize, onSelect = { viewModel.setFontSize(it) })
 
                 SettingsSection("🔊 Voice & Sound")
@@ -182,7 +183,7 @@ fun SettingsScreen(
                 SettingsSection("📋 Legal & Support")
                 LegalRowCompose("🔒", "Privacy Policy") { onNavigate(com.smartvision.ai.compose.navigation.Routes.PRIVACY_POLICY) }
                 LegalRowCompose("📄", "Terms & Conditions") { onNavigate(com.smartvision.ai.compose.navigation.Routes.TERMS_CONDITIONS) }
-                LegalRow("💬", "Send Feedback",       "mailto:support@smartvisionai.app",       ctx)
+                LegalRowCompose("💬", "Send Feedback") { onNavigate(com.smartvision.ai.compose.navigation.Routes.FEEDBACK) }
 
                 SettingsSection("ℹ️ About")
                 AppInfoCard()
@@ -212,21 +213,108 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun ThemeToggleCard(isDarkTheme: Boolean, onToggle: () -> Unit) {
+private fun ThemeDropdownCard(themeMode: String, onThemeSelect: (String) -> Unit) {
     val ext = MaterialTheme.extended
+    var expanded by remember { mutableStateOf(false) }
+
+    val themeLabel = when (themeMode) {
+        "NEON_DARK" -> "Neon Dark"
+        "PURE_BLACK" -> "Pure Black"
+        "LIGHT" -> "Light (White)"
+        else -> "Neon Dark"
+    }
+
+    val themeIcon = when (themeMode) {
+        "NEON_DARK" -> "🌌"
+        "PURE_BLACK" -> "🌑"
+        "LIGHT" -> "☀️"
+        else -> "🌌"
+    }
+
+    val themeDescription = when (themeMode) {
+        "NEON_DARK" -> "Futuristic dark blue with glow effects"
+        "PURE_BLACK" -> "AMOLED pure black background"
+        "LIGHT" -> "Elegant white with clean design"
+        else -> "Futuristic dark blue with glow effects"
+    }
+
     Box(
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
-            .background(Brush.linearGradient(if (isDarkTheme) listOf(NeonBlue.copy(0.12f), NeonPurple.copy(0.08f)) else listOf(Color(0xFFFFF8F0), Color(0xFFF0F4FF))))
-            .border(1.dp, if (isDarkTheme) NeonBlue.copy(0.3f) else Color(0xFFDDE2FF), RoundedCornerShape(16.dp))
-            .clickable(onClick = onToggle).padding(16.dp)
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(ext.glassCard)
+            .border(1.dp, ext.glassBorder, RoundedCornerShape(16.dp))
+            .clickable { expanded = true }
+            .padding(16.dp)
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)).background(if (isDarkTheme) NeonBlue.copy(0.15f) else Color(0xFFFFF0C0)), Alignment.Center) { Text(if (isDarkTheme) "🌙" else "☀️", fontSize = 22.sp) }
-            Column(Modifier.weight(1f)) {
-                Text(if (isDarkTheme) "Dark Neon Mode" else "Light Mode", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
-                Text(if (isDarkTheme) "Premium futuristic dark theme" else "Clean minimal light theme", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(NeonBlue.copy(0.12f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(themeIcon, fontSize = 22.sp)
+                }
+
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = "Active Theme",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = NeonBlue,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = themeLabel,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = themeDescription,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Text("▼", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Switch(checked = isDarkTheme, onCheckedChange = { onToggle() }, colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = NeonBlue, uncheckedTrackColor = ext.glassBorder))
+
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+                modifier = Modifier
+                    .fillMaxWidth(0.9f)
+                    .background(ext.cardBackground)
+                    .border(1.dp, ext.glassBorder, RoundedCornerShape(12.dp))
+            ) {
+                listOf(
+                    Triple("NEON_DARK", "🌌 Neon Dark", "Futuristic blue with glow"),
+                    Triple("PURE_BLACK", "🌑 Pure Black", "AMOLED black layout"),
+                    Triple("LIGHT", "☀️ Light (White)", "Clean light layout")
+                ).forEach { (mode, label, desc) ->
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text(label, color = if (themeMode == mode) NeonBlue else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold)
+                                Text(desc, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        },
+                        onClick = {
+                            onThemeSelect(mode)
+                            expanded = false
+                        },
+                        modifier = Modifier.background(
+                            if (themeMode == mode) NeonBlue.copy(0.08f) else Color.Transparent
+                        )
+                    )
+                }
+            }
         }
     }
 }
@@ -459,7 +547,7 @@ fun ProfileScreen(
         }
     )
 
-    val darkMode by settingsViewModel.darkMode.collectAsStateWithLifecycle()
+    val themeMode by settingsViewModel.themeMode.collectAsStateWithLifecycle()
     val autoSave by settingsViewModel.autoSave.collectAsStateWithLifecycle()
     val fontSize by settingsViewModel.fontSize.collectAsStateWithLifecycle()
     val voiceSpeed by settingsViewModel.voiceSpeed.collectAsStateWithLifecycle()
@@ -695,13 +783,26 @@ fun ProfileScreen(
                             ) {
                                 Text("📊 Admin Analytics Dashboard", style = MaterialTheme.typography.bodyMedium, color = NeonPurple, fontWeight = FontWeight.SemiBold)
                             }
+                            Spacer(Modifier.height(8.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(NeonBlue.copy(0.12f))
+                                    .border(1.dp, NeonBlue.copy(0.3f), RoundedCornerShape(10.dp))
+                                    .clickable { onNavigate(com.smartvision.ai.compose.navigation.Routes.ADMIN_FEEDBACK) }
+                                    .padding(vertical = 10.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("💬 Admin Feedback Panel", style = MaterialTheme.typography.bodyMedium, color = NeonBlue, fontWeight = FontWeight.SemiBold)
+                            }
                         }
                     }
                 }
 
                 ProfileSectionCard(title = "App Customization", icon = "🎨", isExpanded = expandedSection == "PREF", onHeaderClick = { toggleSection("PREF") }) {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        ThemeToggleCard(isDarkTheme = darkMode, onToggle = { settingsViewModel.setDarkMode(!darkMode) })
+                        ThemeDropdownCard(themeMode = themeMode, onThemeSelect = { settingsViewModel.setThemeMode(it) })
                         FontSizeCard(selected = fontSize, onSelect = { settingsViewModel.setFontSize(it) })
                         PremiumToggleRow("📥", "Auto-save Scans", "Store captures directly to gallery", autoSave) { settingsViewModel.setAutoSave(it) }
                     }
@@ -760,7 +861,7 @@ fun ProfileScreen(
 
                 ProfileSectionCard(title = "Support Desk & Project Info", icon = "💬", isExpanded = expandedSection == "SUPPORT", onHeaderClick = { toggleSection("SUPPORT") }) {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        LegalRow("💬", "Send Feedback Report", "mailto:support@smartvisionai.app", ctx)
+                        LegalRowCompose("💬", "Send Feedback Report") { onNavigate(com.smartvision.ai.compose.navigation.Routes.FEEDBACK) }
                         HorizontalDivider(color = ext.glassBorder, thickness = 0.8.dp)
                         AppInfoCard()
                     }

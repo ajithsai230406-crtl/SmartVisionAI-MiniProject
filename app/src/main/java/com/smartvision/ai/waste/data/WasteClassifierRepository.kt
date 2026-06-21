@@ -12,7 +12,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlin.math.abs
 import kotlin.math.sqrt
 import dagger.hilt.android.qualifiers.ApplicationContext
 import org.tensorflow.lite.DataType
@@ -87,16 +86,79 @@ class WasteClassifierRepository @Inject constructor(
         interpreter?.close()
     }
 
+    /** Maps a COCO label to a waste-category label string. */
     private fun mapCocoLabelToWasteLabel(cocoLabel: String): String {
         return when (cocoLabel.lowercase().trim()) {
-            "bottle" -> "plastic_bottle"
-            "cup", "bowl", "wine glass" -> "plastic"
-            "fork", "knife", "spoon", "scissors" -> "metal"
-            "banana", "apple", "orange", "sandwich", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake" -> "organic"
-            "book", "newspaper" -> "paper"
-            "cell phone", "laptop", "keyboard", "mouse", "remote", "tv", "microwave", "oven", "toaster", "refrigerator" -> "electronic_waste"
-            "handbag", "suitcase", "backpack", "tie" -> "textile"
-            else -> "mixed_waste"
+            "bottle"                           -> "plastic_bottle"
+            "cup", "bowl"                      -> "plastic"
+            "frisbee", "kite", "surfboard"     -> "plastic"
+            "fork", "knife", "spoon", "scissors",
+            "bicycle", "car", "motorcycle",
+            "airplane", "bus", "train", "truck",
+            "fire hydrant", "stop sign",
+            "parking meter", "sink"            -> "metal"
+            "banana", "apple", "orange",
+            "sandwich", "broccoli", "carrot",
+            "hot dog", "pizza", "donut", "cake",
+            "bird", "cat", "dog", "horse",
+            "sheep", "cow", "elephant", "bear",
+            "zebra", "giraffe", "potted plant"  -> "organic"
+            "book", "newspaper"                -> "paper"
+            "cell phone"                       -> "electronic_waste"
+            "laptop"                           -> "electronic_waste"
+            "keyboard"                         -> "electronic_waste"
+            "mouse"                            -> "electronic_waste"
+            "remote"                           -> "electronic_waste"
+            "tv"                               -> "electronic_waste"
+            "microwave", "oven", "toaster",
+            "refrigerator", "clock",
+            "hair drier"                       -> "electronic_waste"
+            "handbag", "suitcase", "backpack",
+            "tie", "teddy bear"                -> "textile"
+            "wine glass", "vase"               -> "glass"
+            else                               -> "mixed_waste"
+        }
+    }
+
+    /** Returns a human-friendly exact item name for a COCO label to display in the result card. */
+    private fun cocoLabelToExactItemName(cocoLabel: String): String {
+        return when (cocoLabel.lowercase().trim()) {
+            "cell phone"   -> "Smartphone"
+            "laptop"       -> "Laptop Computer"
+            "keyboard"     -> "Computer Keyboard"
+            "mouse"        -> "Computer Mouse"
+            "remote"       -> "Remote Control"
+            "tv"           -> "Television / Monitor"
+            "microwave"    -> "Microwave Oven"
+            "oven"         -> "Electric Oven"
+            "toaster"      -> "Toaster Appliance"
+            "refrigerator" -> "Refrigerator"
+            "clock"        -> "Electronic Clock"
+            "hair drier"   -> "Hair Dryer"
+            "bottle"       -> "Plastic Bottle"
+            "cup"          -> "Plastic / Paper Cup"
+            "bowl"         -> "Plastic Bowl"
+            "book"         -> "Paper Book"
+            "fork"         -> "Metal Fork"
+            "knife"        -> "Metal Knife"
+            "spoon"        -> "Metal Spoon"
+            "scissors"     -> "Metal Scissors"
+            "bicycle"      -> "Metal Bicycle"
+            "car"          -> "Metal Vehicle"
+            "sink"         -> "Metal Sink"
+            "wine glass"   -> "Glass Wine Bottle"
+            "vase"         -> "Glass Vase"
+            "handbag"      -> "Fabric Handbag"
+            "suitcase"     -> "Fabric Suitcase"
+            "backpack"     -> "Fabric Backpack"
+            "teddy bear"   -> "Textile Toy"
+            "banana", "apple", "orange",
+            "broccoli", "carrot"  -> "Organic Food Waste"
+            "pizza", "hot dog",
+            "donut", "cake",
+            "sandwich"     -> "Organic Food Waste"
+            else -> cocoLabel.replace("_", " ").split(" ")
+                .joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
         }
     }
 
@@ -128,7 +190,7 @@ class WasteClassifierRepository @Inject constructor(
     }
 
     // ── Classify from camera bitmap offline using TFLite model or online via Gemini ───────────────
-    suspend fun classifyFromBitmap(bitmap: Bitmap, isLive: Boolean = false): Result<WasteResult> =
+    suspend fun classifyFromBitmap(bitmap: Bitmap, isLive: Boolean = false): Result<List<WasteResult>> =
         withContext(Dispatchers.Default) {
             runCatching {
                 ensureInitialized()
@@ -140,7 +202,10 @@ class WasteClassifierRepository @Inject constructor(
                         val cached = cacheDao.getCache(hash)
                         if (cached != null) {
                             android.util.Log.d("WasteClassifier", "Gemini cache hit for image hash: $hash")
-                            return@runCatching parseGeminiResponse(cached.response)
+                            val parsed = parseGeminiResponse(cached.response)
+                            if (parsed.isNotEmpty()) {
+                                return@runCatching parsed
+                            }
                         }
                     } catch (e: Exception) {
                         android.util.Log.e("WasteClassifier", "Failed to retrieve/parse cached response", e)
@@ -156,18 +221,20 @@ class WasteClassifierRepository @Inject constructor(
                         )
                         if (geminiResponse.isNotBlank()) {
                             val parsed = parseGeminiResponse(geminiResponse)
-                            try {
-                                cacheDao.insertCache(
-                                    GeminiCacheEntity(
-                                        promptHash = hash,
-                                        prompt = "waste_classify_bitmap",
-                                        response = geminiResponse
+                            if (parsed.isNotEmpty()) {
+                                try {
+                                    cacheDao.insertCache(
+                                        GeminiCacheEntity(
+                                            promptHash = hash,
+                                            prompt = "waste_classify_bitmap",
+                                            response = geminiResponse
+                                        )
                                     )
-                                )
-                            } catch (e: Exception) {
-                                android.util.Log.e("WasteClassifier", "Failed to cache Gemini response", e)
+                                } catch (e: Exception) {
+                                    android.util.Log.e("WasteClassifier", "Failed to cache Gemini response", e)
+                                }
+                                return@runCatching parsed
                             }
-                            return@runCatching parsed
                         }
                     } catch (e: Exception) {
                         android.util.Log.e("WasteClassifier", "Gemini classification failed, falling back to local TFLite", e)
@@ -178,8 +245,7 @@ class WasteClassifierRepository @Inject constructor(
                 val tflite = interpreter
                 val processor = imageProcessor
                 
-                var detectedLabel: String? = null
-                var detectedConfidence = 0.0f
+                val detectedItems = mutableListOf<WasteResult>()
                 
                 if (tflite != null && processor != null) {
                     val inputTensor = tflite.getInputTensor(0)
@@ -209,71 +275,62 @@ class WasteClassifierRepository @Inject constructor(
 
                     val actualCount = outputCount[0].toInt().coerceIn(0, n)
                     
-                    var bestScore = 0.35f
-                    var bestClassId = -1
+                    val processedLabels = mutableSetOf<String>()
                     for (i in 0 until actualCount) {
                         val score = outputScores[0][i]
-                        if (score > bestScore) {
+                        if (score >= 0.60f) {
                             val classId = outputClasses[0][i].toInt()
                             val label = cocoLabels.getOrNull(classId)
-                            if (label != null && label != "person") {
-                                bestScore = score
-                                bestClassId = classId
+                            if (label != null && label != "person" && !processedLabels.contains(label)) {
+                                processedLabels.add(label)
+                                val wasteLabel = mapCocoLabelToWasteLabel(label)
+                                val exactName = cocoLabelToExactItemName(label)
+                                val result = classifyByLabel(wasteLabel).copy(
+                                    confidence = score,
+                                    exactItemName = exactName
+                                )
+                                detectedItems.add(result)
                             }
-                        }
-                    }
-                    if (bestClassId != -1) {
-                        val label = cocoLabels.getOrNull(bestClassId)
-                        if (label != null) {
-                            if (bestScore < 0.60f) {
-                                detectedLabel = "Unknown Object"
-                            } else {
-                                detectedLabel = label
-                            }
-                            detectedConfidence = bestScore
                         }
                     }
                 }
 
-                if (detectedLabel != null && detectedLabel != "Unknown Object") {
-                    android.util.Log.d("WasteClassifier", "Prediction generated: $detectedLabel with confidence $detectedConfidence")
-                    val wasteLabel = mapCocoLabelToWasteLabel(detectedLabel)
-                    val result = classifyByLabel(wasteLabel)
-                    result.copy(
-                        confidence = detectedConfidence,
-                        exactItemName = detectedLabel.replace("_", " ").split(" ")
-                            .joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
-                    )
+                if (detectedItems.isNotEmpty()) {
+                    android.util.Log.d("WasteClassifier", "TFLite predictions generated: ${detectedItems.size} items")
+                    detectedItems
                 } else {
-                    android.util.Log.d("WasteClassifier", "No model prediction above threshold. Using fallback waste result.")
-                    classifyByLabel("mixed_waste").copy(
-                        confidence = 0.50f,
-                        exactItemName = "Unknown Object"
-                    )
+                    android.util.Log.d("WasteClassifier", "No model prediction above threshold.")
+                    throw Exception("Unable to classify confidently. Please rescan.")
                 }
             }
         }
 
     // ── Gemini prompt ─────────────────────────────────────────────────────────
     private fun buildPrompt() = """
-You are a professional waste classification AI trained on TrashNet, TACO, and WasteNet datasets.
-Analyze the image and identify the waste item visible.
+You are an expert waste classification AI. Analyze the image carefully.
+First, determine if the image clearly depicts one or more recognizable waste objects.
+If the image does not show any clear physical waste item, or if the confidence is low, or if the object is unsupported or completely unrelated to waste management, respond with EXACTLY:
+UNSUPPORTED
 
-Respond EXACTLY in this structured format (no extra text):
+Otherwise, identify all key waste objects visible in the image. You may return up to 3 objects.
+For each identified object, output a separate section. Start each object's section with "--- OBJECT [index] ---" and respond in the following format (do not use markdown, replace values inside brackets):
 
-EXACT_ITEM: [Specific item, e.g. PET Water Bottle, Cardboard Box, AA Battery, Smartphone]
-WASTE_TYPE: [EXACTLY one of: plastic, paper, glass, metal, organic, ewaste, battery, hazardous, medical, textile, recyclable, non_recyclable]
-RECYCLING_CATEGORY: [e.g. Recyclable Plastic #1, Hazardous Waste, E-Waste WEEE, Organic Compost]
-DISPOSAL_METHOD: [Exact bin or facility, e.g. Blue Recycle Bin, Green Wet Waste Bin, WEEE Collection Point, HHW Facility, Medical Hazmat Box]
+--- OBJECT 1 ---
+EXACT_ITEM: [Precise name, e.g. Smartphone, Metal Water Bottle, PET Plastic Bottle, Chemical Container, AA Battery]
+WASTE_TYPE: [EXACTLY one of: plastic, paper, glass, metal, organic, ewaste, battery, hazardous, medical, textile, wood, recyclable, non_recyclable]
+RECYCLING_CATEGORY: [e.g. E-Waste WEEE, Recyclable Plastic #1, Hazardous Chemical, Metal Scrap, Organic Compost, Wood Waste]
+DISPOSAL_METHOD: [Exact bin or facility, e.g. WEEE Collection Point, Blue Recycle Bin, HHW Facility, Green Wet Waste Bin, Bulky Waste Depot]
 IS_RECYCLABLE: [true or false]
 IS_REUSABLE: [true or false]
+IS_DECOMPOSABLE: [true or false]
 CONFIDENCE: [0.0 to 1.0]
 ECO_SCORE: [0 to 100, where 100 = best eco impact]
 CARBON_REDUCTION: [e.g. 1.5 kg CO₂ saved by recycling this]
 CARBON_IMPACT: [e.g. 6.2 kg CO₂ per kg to produce this item]
-SUSTAINABILITY_TIP: [one sentence practical tip]
-ENVIRONMENTAL_IMPACT: [one sentence on environmental consequence]
-REUSE_SUGGESTIONS: [one sentence concrete upcycling or reuse idea]
+SUSTAINABILITY_TIP: [one practical recycling or green tip]
+ENVIRONMENTAL_IMPACT: [one sentence on environmental consequence of landfilling it]
+REUSE_SUGGESTIONS: [one concrete upcycling or reuse idea]
+SAFETY_PRECAUTIONS: [one sentence on how to handle it safely, e.g., tape battery terminals, wear gloves for medical waste, avoid broken glass]
 DISPOSAL_STEPS:
 - [Step 1]
 - [Step 2]
@@ -282,7 +339,7 @@ DISPOSAL_STEPS:
 """.trimIndent()
 
     // ── Classify from URI ──────────────────────────────────────────────────────
-    suspend fun classifyFromUri(context: Context, uri: Uri): Result<WasteResult> =
+    suspend fun classifyFromUri(context: Context, uri: Uri): Result<List<WasteResult>> =
         withContext(Dispatchers.IO) {
             runCatching {
                 val bitmap = android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
@@ -298,6 +355,7 @@ DISPOSAL_STEPS:
                       primaryType != WasteType.HAZARDOUS &&
                       primaryType != WasteType.MEDICAL
         val isReuse = primaryType != WasteType.MEDICAL && primaryType != WasteType.BATTERY
+        val isDecomp = primaryType == WasteType.ORGANIC || primaryType == WasteType.PAPER
         return buildResult(
             rawLabel = rawLabel,
             primaryType = primaryType,
@@ -314,16 +372,34 @@ DISPOSAL_STEPS:
             carbonImpact = "",
             sustainabilityTip = defaultKnow.ecoTip,
             isRecyclable = isRecyc,
-            isReusable = isReuse
+            isReusable = isReuse,
+            isDecomposable = isDecomp,
+            safetyPrecautions = "Handle with care. Follow standard safety protocols."
         )
     }
 
     // ── Response parser ────────────────────────────────────────────────────────
-    private fun parseGeminiResponse(raw: String): WasteResult {
+    private fun parseGeminiResponse(raw: String): List<WasteResult> {
+        if (raw.contains("UNSUPPORTED", ignoreCase = true) || raw.isBlank()) {
+            return emptyList()
+        }
+
+        val sections = if (raw.contains("--- OBJECT", ignoreCase = true)) {
+            raw.split(Regex("--- OBJECT \\d+ ---", RegexOption.IGNORE_CASE))
+                .map { it.trim() }
+                .filter { it.isNotEmpty() && it.contains("EXACT_ITEM") }
+        } else {
+            listOf(raw.trim())
+        }
+
+        return sections.mapNotNull { parseObjectSection(it) }
+    }
+
+    private fun parseObjectSection(raw: String): WasteResult? {
         fun extract(tag: String) = Regex("$tag:\\s*(.+)", RegexOption.IGNORE_CASE)
             .find(raw)?.groupValues?.get(1)?.trim() ?: ""
 
-        val exactItem          = extract("EXACT_ITEM").ifBlank { "Unknown Waste Item" }
+        val exactItem          = extract("EXACT_ITEM").ifBlank { return null }
         val recyclingCategory  = extract("RECYCLING_CATEGORY").ifBlank { "General Waste" }
         val wasteTypeLabel     = extract("WASTE_TYPE").ifBlank { "non_recyclable" }
         val disposalMethod     = extract("DISPOSAL_METHOD").ifBlank { "" }
@@ -334,6 +410,7 @@ DISPOSAL_STEPS:
         val sustainabilityTip  = extract("SUSTAINABILITY_TIP").ifBlank { "Reduce single-use items where possible." }
         val environmentalImpact = extract("ENVIRONMENTAL_IMPACT").ifBlank { "Landfilled waste degrades slowly and emits greenhouse gases." }
         val reuseSuggestions   = extract("REUSE_SUGGESTIONS").ifBlank { "Repurpose for storage or home organization." }
+        val safetyPrecautions  = extract("SAFETY_PRECAUTIONS").ifBlank { "Handle with care." }
 
         val primaryType = wasteTypeLabel.toWasteType()
 
@@ -346,18 +423,18 @@ DISPOSAL_STEPS:
             (!extract("IS_REUSABLE").contains("false", ignoreCase = true) &&
              primaryType != WasteType.MEDICAL &&
              primaryType != WasteType.BATTERY)
+        val isDecomposable = extract("IS_DECOMPOSABLE").contains("true", ignoreCase = true) ||
+            (!extract("IS_DECOMPOSABLE").contains("false", ignoreCase = true) &&
+             (primaryType == WasteType.ORGANIC || primaryType == WasteType.PAPER))
 
         // Extract disposal steps
         val steps = mutableListOf<String>()
-        val disposalIndex = raw.indexOf("DISPOSAL_STEPS:", ignoreCase = true)
-        if (disposalIndex != -1) {
-            raw.substring(disposalIndex + "DISPOSAL_STEPS:".length).lines().forEach { line ->
-                val trimmed = line.trim()
-                if (trimmed.startsWith("-") || trimmed.startsWith("*") ||
-                    (trimmed.firstOrNull()?.isDigit() == true && trimmed.contains("."))) {
-                    val content = trimmed.substring(1).trim().replace(Regex("^\\d+\\.\\s*"), "")
-                    if (content.isNotEmpty()) steps.add(content)
-                }
+        raw.lines().forEach { line ->
+            val trimmed = line.trim()
+            if (trimmed.startsWith("-") || trimmed.startsWith("*") ||
+                (trimmed.firstOrNull()?.isDigit() == true && trimmed.contains("."))) {
+                val content = trimmed.substring(1).trim().replace(Regex("^\\d+\\.\\s*"), "")
+                if (content.isNotEmpty()) steps.add(content)
             }
         }
         val finalSteps = steps.ifEmpty { WasteKnowledgeBase.getKnowledge(primaryType).disposalSteps }
@@ -377,7 +454,9 @@ DISPOSAL_STEPS:
             carbonImpact = carbonImpact,
             sustainabilityTip = sustainabilityTip,
             isRecyclable = isRecyclable,
-            isReusable = isReusable
+            isReusable = isReusable,
+            isDecomposable = isDecomposable,
+            safetyPrecautions = safetyPrecautions
         )
     }
 
@@ -406,12 +485,39 @@ DISPOSAL_STEPS:
         carbonImpact: String = "",
         sustainabilityTip: String = "",
         isRecyclable: Boolean = true,
-        isReusable: Boolean = true
+        isReusable: Boolean = true,
+        isDecomposable: Boolean = false,
+        safetyPrecautions: String = "",
+        imagePath: String? = null
     ): WasteResult {
+        // Related type groups: types in the same group get higher secondary scores
+        val relatedGroups: Map<WasteType, List<WasteType>> = mapOf(
+            WasteType.PLASTIC     to listOf(WasteType.RECYCLABLE, WasteType.NON_RECYCLABLE, WasteType.MIXED),
+            WasteType.METAL       to listOf(WasteType.RECYCLABLE, WasteType.EWASTE, WasteType.MIXED),
+            WasteType.PAPER       to listOf(WasteType.RECYCLABLE, WasteType.ORGANIC, WasteType.MIXED),
+            WasteType.GLASS       to listOf(WasteType.RECYCLABLE, WasteType.NON_RECYCLABLE, WasteType.MIXED),
+            WasteType.ORGANIC     to listOf(WasteType.PAPER, WasteType.MIXED, WasteType.RECYCLABLE),
+            WasteType.EWASTE      to listOf(WasteType.METAL, WasteType.BATTERY, WasteType.NON_RECYCLABLE),
+            WasteType.BATTERY     to listOf(WasteType.EWASTE, WasteType.HAZARDOUS, WasteType.NON_RECYCLABLE),
+            WasteType.HAZARDOUS   to listOf(WasteType.BATTERY, WasteType.MEDICAL, WasteType.NON_RECYCLABLE),
+            WasteType.MEDICAL     to listOf(WasteType.HAZARDOUS, WasteType.NON_RECYCLABLE, WasteType.MIXED),
+            WasteType.TEXTILE     to listOf(WasteType.NON_RECYCLABLE, WasteType.MIXED, WasteType.RECYCLABLE),
+            WasteType.RECYCLABLE  to listOf(WasteType.PLASTIC, WasteType.PAPER, WasteType.METAL),
+            WasteType.NON_RECYCLABLE to listOf(WasteType.MIXED, WasteType.PLASTIC, WasteType.TEXTILE),
+            WasteType.MIXED       to listOf(WasteType.NON_RECYCLABLE, WasteType.RECYCLABLE, WasteType.PLASTIC)
+        )
+        val related = relatedGroups[primaryType] ?: emptyList()
+        val remaining = 1f - confidence
+
         val allTypes = WasteType.values()
         val scores = allTypes.map { t ->
-            val score = if (t == primaryType) confidence
-                        else (confidence * (0.05f + abs(t.name.hashCode() % 15) / 100f)).coerceAtMost(0.25f)
+            val score = when {
+                t == primaryType -> confidence
+                related.indexOf(t) == 0 -> (remaining * 0.55f).coerceAtMost(0.30f)   // top related
+                related.indexOf(t) == 1 -> (remaining * 0.25f).coerceAtMost(0.15f)   // 2nd related
+                related.indexOf(t) == 2 -> (remaining * 0.12f).coerceAtMost(0.08f)   // 3rd related
+                else -> (remaining * 0.02f).coerceAtMost(0.03f)                        // unrelated
+            }
             WasteCategoryScore(t, score)
         }.sortedByDescending { it.score }
 
@@ -441,7 +547,10 @@ DISPOSAL_STEPS:
             carbonImpact     = carbonImpact,
             sustainabilityTip = sustainabilityTip,
             isRecyclable     = isRecyclable,
-            isReusable       = isReusable
+            isReusable       = isReusable,
+            isDecomposable   = isDecomposable,
+            imagePath        = imagePath,
+            safetyPrecautions = safetyPrecautions
         )
     }
 }

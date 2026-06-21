@@ -27,6 +27,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import coil.compose.AsyncImage
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -79,6 +81,14 @@ fun ObjectDetectorScreen(
         cameraRef.value?.cameraControl?.enableTorch(flashEnabled)
     }
 
+    val context = LocalContext.current
+    LaunchedEffect(detectionState) {
+        if (detectionState is DetectionState.Error) {
+            android.widget.Toast.makeText(context, (detectionState as DetectionState.Error).message, android.widget.Toast.LENGTH_LONG).show()
+            viewModel.dismissError()
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
 
         // ── Camera feed ──────────────────────────────────────────────────────
@@ -127,7 +137,12 @@ fun ObjectDetectorScreen(
             onFlash      = { viewModel.toggleFlash() },
             onOverlay    = { viewModel.toggleOverlay() },
             onResume     = { viewModel.resumeLive() },
-            onGallery    = { galleryLauncher() }
+            onGallery    = { galleryLauncher() },
+            onAiScan     = {
+                previewViewRef.value?.bitmap?.let { bitmap ->
+                    viewModel.runHighAccuracyAiScan(bitmap)
+                }
+            }
         )
 
         // ── Bottom detection info strip ───────────────────────────────────────
@@ -395,8 +410,8 @@ private fun BoundingBoxOverlay(
         // Canvas for the boxes
         androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
             items.forEach { item ->
-                val color = Color(item.accentColor)
-                val isSelected = item.id == selectedItem?.id
+                val isSelected = selectedItem != null && item.id == selectedItem.id
+                val color = if (isSelected) Color(selectedItem!!.accentColor) else Color(item.accentColor)
                 
                 // Rotated frame dimensions
                 val frameW = frameWidth.toFloat().coerceAtLeast(1f)
@@ -484,7 +499,9 @@ private fun BoundingBoxOverlay(
         // Label chips — positioned via Box offset modifiers, mapped correctly with local density
         if (canvasSize != Size.Zero) {
             items.forEach { item ->
-                val color  = Color(item.accentColor)
+                val isSelected = selectedItem != null && item.id == selectedItem.id
+                val color = if (isSelected) Color(selectedItem!!.accentColor) else Color(item.accentColor)
+                val label = if (isSelected) selectedItem!!.label else item.label
                 
                 val frameW = frameWidth.toFloat().coerceAtLeast(1f)
                 val frameH = frameHeight.toFloat().coerceAtLeast(1f)
@@ -514,7 +531,7 @@ private fun BoundingBoxOverlay(
                         .padding(horizontal = 8.dp, vertical = 3.dp)
                 ) {
                     Text(
-                        "#${item.id} ${item.label.replaceFirstChar { it.uppercase() }}  $pct%",
+                        "#${item.id} ${label.replaceFirstChar { it.uppercase() }}  $pct%",
                         style      = MaterialTheme.typography.labelSmall,
                         color      = Color.Black,
                         fontWeight = FontWeight.Bold,
@@ -541,7 +558,8 @@ private fun DetectorTopHud(
     onFlash:      () -> Unit,
     onOverlay:    () -> Unit,
     onResume:     () -> Unit,
-    onGallery:    () -> Unit = {}
+    onGallery:    () -> Unit = {},
+    onAiScan:     () -> Unit = {}
 ) {
     Row(
         modifier = Modifier
@@ -594,7 +612,33 @@ private fun DetectorTopHud(
 
         // Right controls
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (!isLive) HudButton("▶", onClick = onResume)
+            if (!isLive) {
+                HudButton("▶", onClick = onResume)
+            } else {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            Brush.horizontalGradient(listOf(NeonBlue, NeonPurple))
+                        )
+                        .clickable(onClick = onAiScan)
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text("✨", fontSize = 14.sp, color = Color.White)
+                        Text(
+                            "AI Scan",
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
             HudButton(if (showOverlay) "◈" else "◉", onClick = onOverlay)
             HudButton(if (flashEnabled) "⚡" else "🔦", onClick = onFlash)
             HudButton("🖼️", onClick = onGallery)
@@ -694,9 +738,9 @@ private fun ObjectsListSheet(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        "All items identified with high confidence",
+                        "Ranked by confidence score — highest first",
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color.Gray
+                        color = NeonCyan.copy(0.8f)
                     )
                 }
             }
@@ -708,95 +752,130 @@ private fun ObjectsListSheet(
 
         Spacer(Modifier.height(10.dp))
 
-        // List of items
+        // Confidence Ranking List
         LazyColumn(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(bottom = 20.dp)
         ) {
-            items(items) { item ->
+            items(items.sortedByDescending { it.confidence }) { item ->
                 val color = Color(item.accentColor)
                 val pct = (item.confidence * 100).toInt()
                 val know = ObjectKnowledgeBase.getKnowledge(item.label)
+                val rank = items.sortedByDescending { it.confidence }.indexOf(item) + 1
 
-                Row(
+                // Confidence color: green > 80%, yellow 60-80%, orange below
+                val confColor = when {
+                    pct >= 80 -> NeonCyan
+                    pct >= 65 -> Color(0xFFFFD700)
+                    else      -> Color(0xFFFF9800)
+                }
+
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(16.dp))
                         .background(Color.White.copy(0.03f))
-                        .border(1.dp, color.copy(0.2f), RoundedCornerShape(16.dp))
-                        .padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .border(1.dp, confColor.copy(0.25f), RoundedCornerShape(16.dp))
+                        .clickable { onSelect(item) }
+                        .padding(12.dp)
                 ) {
-                    // Left Icon
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(color.copy(0.15f))
-                            .border(1.dp, color.copy(0.4f), RoundedCornerShape(10.dp)),
-                        contentAlignment = Alignment.Center
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Text(know.emoji, fontSize = 22.sp)
-                    }
-
-                    Spacer(Modifier.width(12.dp))
-
-                    // Middle details
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        // Rank badge
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .background(confColor.copy(0.15f))
+                                .border(1.dp, confColor.copy(0.5f), CircleShape),
+                            contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                know.label,
-                                style = MaterialTheme.typography.titleSmall,
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                "#$rank",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = confColor,
+                                fontWeight = FontWeight.Bold
                             )
-                            // Confidence badge
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(color.copy(0.2f))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            ) {
-                                Text(
-                                    "$pct% confidence",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = color,
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
                         }
-                        Spacer(Modifier.height(2.dp))
+
+                        // Emoji icon
+                        Text(know.emoji, fontSize = 20.sp)
+
+                        // Label
                         Text(
-                            know.description,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.LightGray,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            lineHeight = 16.sp
+                            know.label,
+                            style = MaterialTheme.typography.titleSmall,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+
+                        // Confidence % badge
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(confColor.copy(0.18f))
+                                .border(1.dp, confColor.copy(0.4f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                "$pct%",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = confColor,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+
+                    // Confidence progress bar
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(0.08f))
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .fillMaxWidth(item.confidence)
+                                .background(
+                                    Brush.horizontalGradient(listOf(confColor.copy(0.6f), confColor)),
+                                    CircleShape
+                                )
                         )
                     }
 
-                    Spacer(Modifier.width(10.dp))
+                    Spacer(Modifier.height(4.dp))
 
-                    // Right button
-                    TextButton(
-                        onClick = { onSelect(item) },
-                        contentPadding = PaddingValues(horizontal = 8.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            "View Details >",
+                            text = when {
+                                pct >= 80 -> "✓ High Confidence"
+                                pct >= 65 -> "⚠ Medium Confidence"
+                                else      -> "— Low Confidence"
+                            },
                             style = MaterialTheme.typography.labelSmall,
-                            color = color,
-                            fontWeight = FontWeight.Bold
+                            color = confColor.copy(0.8f),
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            "Tap for details ›",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = color.copy(0.7f)
                         )
                     }
                 }
@@ -869,6 +948,7 @@ private fun ObjectDetailSheet(
     val pct   = (item.confidence * 100).toInt()
 
     var sheetState by remember(item.id) { mutableStateOf(SheetState.COLLAPSED) }
+    var activeTab by remember(item.id) { mutableStateOf(0) }
     val density = LocalDensity.current
 
     val targetHeight = when (sheetState) {
@@ -1004,7 +1084,91 @@ private fun ObjectDetailSheet(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 20.dp, vertical = 10.dp),
+                            .padding(horizontal = 20.dp, vertical = 6.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Header
+                        Row(
+                            modifier              = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment     = Alignment.Top
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment     = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(44.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(color.copy(0.15f))
+                                        .border(1.dp, color.copy(0.4f), RoundedCornerShape(12.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) { Text(know.emoji, fontSize = 22.sp) }
+
+                                Column {
+                                    Text(know.label, style = MaterialTheme.typography.titleMedium, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 2.dp)) {
+                                        NeonBadge(know.category.displayName, color)
+                                        NeonBadge("$pct% match", NeonGreen)
+                                    }
+                                }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                SmallRoundBtn("🔊", onClick = onSpeak)
+                                SmallRoundBtn("✕", onClick = onDismiss)
+                            }
+                        }
+
+                        // Google Lens Tabs
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color.White.copy(0.04f))
+                                .padding(3.dp),
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            val tabs = listOf("Overview", "Visual Match", "Specs")
+                            tabs.forEachIndexed { index, title ->
+                                val isSel = activeTab == index
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(if (isSel) NeonBlue.copy(0.18f) else Color.Transparent)
+                                        .border(1.dp, if (isSel) NeonBlue.copy(0.35f) else Color.Transparent, RoundedCornerShape(6.dp))
+                                        .clickable { activeTab = index }
+                                        .padding(vertical = 6.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = title,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (isSel) Color.White else Color.White.copy(0.6f),
+                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                }
+                            }
+                        }
+
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(160.dp)
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            VisualSearchContent(know = know, activeTab = activeTab, color = color, onNavigate = onNavigate)
+                        }
+                    }
+                }
+                SheetState.EXPANDED -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 20.dp, vertical = 6.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         // Header
@@ -1020,7 +1184,7 @@ private fun ObjectDetailSheet(
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(48.dp)
+                                        .size(46.dp)
                                         .clip(RoundedCornerShape(12.dp))
                                         .background(color.copy(0.15f))
                                         .border(1.dp, color.copy(0.4f), RoundedCornerShape(12.dp)),
@@ -1041,108 +1205,37 @@ private fun ObjectDetailSheet(
                             }
                         }
 
-                        ConfidenceBar(confidence = item.confidence, color = color)
-
-                        if (know.specializedActionType != null) {
-                            SpecializedActionBanner(
-                                type = know.specializedActionType,
-                                data = know.specializedActionData ?: "",
-                                onAction = {
-                                    val targetRoute = when (know.specializedActionType) {
-                                        "calculator" -> "student_helper_v2"
-                                        "textbook"   -> "ocr_translator"
-                                        "medicine"   -> "medicine_scanner"
-                                        "waste"      -> "waste_classifier_v2"
-                                        else         -> null
-                                    }
-                                    if (targetRoute != null) {
-                                        onDismiss()
-                                        onNavigate(targetRoute)
-                                    }
-                                }
-                            )
-                        }
-
-                        DetailSection(title = "About / Purpose", icon = "ℹ️", color = color) {
-                            Text(know.description, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.9f), maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        }
-
-                        Box(
+                        // Google Lens Tabs
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { sheetState = SheetState.EXPANDED }
-                                .padding(vertical = 4.dp),
-                            contentAlignment = Alignment.Center
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.White.copy(0.04f))
+                                .padding(4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Text("Swipe up or tap for full specifications ▴", style = MaterialTheme.typography.labelSmall, color = NeonBlue, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                }
-                SheetState.EXPANDED -> {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 20.dp, vertical = 10.dp)
-                    ) {
-                        // Header
-                        Row(
-                            modifier              = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment     = Alignment.Top
-                        ) {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                verticalAlignment     = Alignment.CenterVertically,
-                                modifier = Modifier.weight(1f)
-                            ) {
+                            val tabs = listOf("Overview", "Visual Match", "Specs")
+                            tabs.forEachIndexed { index, title ->
+                                val isSel = activeTab == index
                                 Box(
                                     modifier = Modifier
-                                        .size(48.dp)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(color.copy(0.15f))
-                                        .border(1.dp, color.copy(0.4f), RoundedCornerShape(12.dp)),
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (isSel) NeonBlue.copy(0.2f) else Color.Transparent)
+                                        .border(1.dp, if (isSel) NeonBlue.copy(0.4f) else Color.Transparent, RoundedCornerShape(8.dp))
+                                        .clickable { activeTab = index }
+                                        .padding(vertical = 8.dp),
                                     contentAlignment = Alignment.Center
-                                ) { Text(know.emoji, fontSize = 24.sp) }
-
-                                Column {
-                                    Text(know.label, style = MaterialTheme.typography.titleMedium, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 2.dp)) {
-                                        NeonBadge(know.category.displayName, color)
-                                        NeonBadge("$pct% match", NeonGreen)
-                                    }
+                                ) {
+                                    Text(
+                                        text = title,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = if (isSel) Color.White else Color.White.copy(0.6f),
+                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
+                                    )
                                 }
                             }
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                SmallRoundBtn("🔊", onClick = onSpeak)
-                                SmallRoundBtn("✕", onClick = onDismiss)
-                            }
                         }
-
-                        Spacer(Modifier.height(8.dp))
-                        ConfidenceBar(confidence = item.confidence, color = color)
-
-                        if (know.specializedActionType != null) {
-                            Spacer(Modifier.height(8.dp))
-                            SpecializedActionBanner(
-                                type = know.specializedActionType,
-                                data = know.specializedActionData ?: "",
-                                onAction = {
-                                    val targetRoute = when (know.specializedActionType) {
-                                        "calculator" -> "student_helper_v2"
-                                        "textbook"   -> "ocr_translator"
-                                        "medicine"   -> "medicine_scanner"
-                                        "waste"      -> "waste_classifier_v2"
-                                        else         -> null
-                                    }
-                                    if (targetRoute != null) {
-                                        onDismiss()
-                                        onNavigate(targetRoute)
-                                    }
-                                }
-                            )
-                        }
-
-                        Spacer(Modifier.height(10.dp))
 
                         // Scrollable specifications
                         Column(
@@ -1151,78 +1244,8 @@ private fun ObjectDetailSheet(
                                 .verticalScroll(rememberScrollState()),
                             verticalArrangement = Arrangement.spacedBy(14.dp)
                         ) {
-                            DetailSection(title = "About / Purpose", icon = "ℹ️", color = color) {
-                                Text(know.description, style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(0.9f), lineHeight = 21.sp)
-                            }
-
-                            DetailSection(title = "Usage Suggestions", icon = "⚙️", color = color) {
-                                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                                    know.uses.forEach { use ->
-                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                            Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(color))
-                                            Text(use, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f))
-                                        }
-                                    }
-                                }
-                            }
-
-                            DetailSection(title = "Safety & Guidelines", icon = "⚠️", color = NeonPink) {
-                                Text(know.safetyInfo, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f), lineHeight = 19.sp)
-                            }
-
-                            if (know.maintenanceTips.isNotEmpty()) {
-                                DetailSection(title = "Maintenance & Care", icon = "🛠️", color = NeonPurple) {
-                                    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                                        know.maintenanceTips.forEach { tip ->
-                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                                Box(modifier = Modifier.size(5.dp).clip(CircleShape).background(NeonPurple))
-                                                Text(tip, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f))
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            if (know.buyingSuggestions.isNotEmpty()) {
-                                DetailSection(title = "Smart Buying Suggestions", icon = "🛒", color = NeonBlue) {
-                                    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                                        know.buyingSuggestions.forEach { suggestion ->
-                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
-                                                Text("🛍️", fontSize = 11.sp, modifier = Modifier.padding(top = 1.dp))
-                                                Text(suggestion, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f))
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            DetailSection(title = "Environmental & Carbon Impact", icon = "🌿", color = NeonGreen) {
-                                Text(know.environmentalImpact, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f), lineHeight = 19.sp)
-                            }
-
-                            if (know.relatedRecommendations.isNotEmpty()) {
-                                DetailSection(title = "Related Recommendations", icon = "🔍", color = Color(0xFFFFD700)) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        know.relatedRecommendations.forEach { rec ->
-                                            Box(
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .background(Color.White.copy(0.06f))
-                                                    .border(1.dp, Color.White.copy(0.12f), RoundedCornerShape(8.dp))
-                                                    .padding(horizontal = 10.dp, vertical = 6.dp)
-                                            ) {
-                                                Text(rec, style = MaterialTheme.typography.labelSmall, color = Color.White, fontWeight = FontWeight.Medium)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            FunFactBubble(know.funFact, color)
-
+                            VisualSearchContent(know = know, activeTab = activeTab, color = color, onNavigate = onNavigate)
+                            
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -1237,6 +1260,301 @@ private fun ObjectDetailSheet(
                 }
             }
         }
+    }
+}
+
+@Composable
+internal fun VisualSearchContent(
+    know: ObjectKnowledge,
+    activeTab: Int,
+    color: Color,
+    onNavigate: (String) -> Unit
+) {
+    val search = know.searchData
+    val uriHandler = LocalUriHandler.current
+    
+    when (activeTab) {
+        0 -> { // Overview Tab
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                DetailSection(title = "About / Purpose", icon = "ℹ️", color = color) {
+                    Text(know.description, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.9f))
+                }
+
+                // AI Visual Search Summary Card
+                val summaryText = search?.aiSummary ?: ""
+                DetailSection(
+                    title = "AI Visual Search Summary",
+                    icon = "✨",
+                    color = NeonPurple
+                ) {
+                    if (summaryText.isNotBlank()) {
+                        Text(
+                            text = summaryText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White,
+                            lineHeight = 18.sp
+                        )
+                    } else {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(14.dp), color = NeonPurple, strokeWidth = 1.5.dp)
+                            Text("Generating AI search summary...", style = MaterialTheme.typography.labelSmall, color = Color.White.copy(0.6f))
+                        }
+                    }
+                }
+
+                if (know.safetyInfo.isNotBlank()) {
+                    DetailSection(title = "Safety & Guidelines", icon = "⚠️", color = NeonPink) {
+                        Text(know.safetyInfo, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f))
+                    }
+                }
+
+                if (know.environmentalImpact.isNotBlank()) {
+                    DetailSection(title = "Environmental Impact", icon = "🌿", color = NeonGreen) {
+                        Text(know.environmentalImpact, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f))
+                    }
+                }
+
+                if (know.funFact.isNotBlank()) {
+                    FunFactBubble(know.funFact, color)
+                }
+            }
+        }
+        1 -> { // Search Results / Visual Matches Tab
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                if (search == null) {
+                    Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = NeonBlue, modifier = Modifier.size(24.dp))
+                    }
+                } else {
+                    if (search.relatedProducts.isNotEmpty()) {
+                        DetailSection(title = "Related Products", icon = "🛒", color = NeonBlue) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                search.relatedProducts.forEach { p ->
+                                    Box(
+                                        modifier = Modifier
+                                            .width(160.dp)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(Color.White.copy(0.04f))
+                                            .border(1.dp, Color.White.copy(0.1f), RoundedCornerShape(12.dp))
+                                            .clickable { if (p.url.isNotBlank()) uriHandler.openUri(p.url) }
+                                            .padding(10.dp)
+                                    ) {
+                                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Text(p.name, style = MaterialTheme.typography.labelSmall, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            Text(p.brand, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.5f), maxLines = 1)
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(p.price, style = MaterialTheme.typography.labelSmall, color = NeonGreen, fontWeight = FontWeight.Bold)
+                                                Box(
+                                                    modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(Color.White.copy(0.1f)).padding(horizontal = 4.dp, vertical = 2.dp)
+                                                ) {
+                                                    Text(p.rating, style = MaterialTheme.typography.bodySmall, color = Color(0xFFFFD700), fontSize = 9.sp)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (search.similarImages.isNotEmpty()) {
+                        DetailSection(title = "Visual Matches", icon = "🖼️", color = NeonCyan) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                search.similarImages.forEach { im ->
+                                    Box(
+                                        modifier = Modifier
+                                            .width(120.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(Color.White.copy(0.04f))
+                                            .border(1.dp, Color.White.copy(0.1f), RoundedCornerShape(10.dp))
+                                            .clickable { if (im.sourceUrl.isNotBlank()) uriHandler.openUri(im.sourceUrl) }
+                                    ) {
+                                        Column {
+                                            AsyncImage(
+                                                model = im.imageUrl,
+                                                contentDescription = null,
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(80.dp)
+                                                    .clip(RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp))
+                                            )
+                                            Text(
+                                                text = im.title,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = Color.White.copy(0.7f),
+                                                modifier = Modifier.padding(6.dp),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (search.webResults.isNotEmpty()) {
+                        Text("Web Search Results", style = MaterialTheme.typography.labelMedium, color = Color.White.copy(0.7f), fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
+                        search.webResults.forEach { r ->
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color.White.copy(0.03f))
+                                    .border(1.dp, NeonBlue.copy(0.2f), RoundedCornerShape(12.dp))
+                                    .clickable { if (r.url.isNotBlank()) uriHandler.openUri(r.url) }
+                                    .padding(12.dp)
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(r.title, style = MaterialTheme.typography.labelMedium, color = NeonCyan, fontWeight = FontWeight.Bold)
+                                    Text(r.snippet, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.8f), lineHeight = 16.sp)
+                                    Text(r.url.substringAfter("://").substringBefore("/"), style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.4f), fontSize = 10.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        2 -> { // Specifications Tab
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (search == null) {
+                    Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = NeonBlue, modifier = Modifier.size(24.dp))
+                    }
+                } else {
+                    when (know.category) {
+                        ObjectCategory.PRODUCT, ObjectCategory.PACKAGING -> {
+                            DetailSection(title = "Product Information", icon = "🛍️", color = NeonCyan) {
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    if (search.brand.isNotBlank()) SpecRow("Brand", search.brand)
+                                    if (search.weight.isNotBlank()) SpecRow("Weight/Net Vol", search.weight)
+                                    if (search.priceRange.isNotBlank()) SpecRow("Est Price Range", search.priceRange)
+                                    if (search.ratings.isNotBlank()) SpecRow("Average Rating", search.ratings)
+                                    if (search.manufacturerInfo.isNotBlank()) SpecRow("Manufacturer", search.manufacturerInfo)
+                                }
+                            }
+                            if (search.ingredients.isNotEmpty()) {
+                                DetailSection(title = "Ingredients", icon = "🧪", color = NeonPurple) {
+                                    Text(search.ingredients.joinToString(", "), style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f), lineHeight = 18.sp)
+                                }
+                            }
+                        }
+                        ObjectCategory.ELECTRONICS -> {
+                            DetailSection(title = "Gadget Specifications", icon = "⚡", color = NeonPurple) {
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    if (search.brand.isNotBlank()) SpecRow("Brand", search.brand)
+                                    if (search.launchInfo.isNotBlank()) SpecRow("Launch details", search.launchInfo)
+                                    if (search.priceRange.isNotBlank()) SpecRow("Est Price", search.priceRange)
+                                    if (search.ratings.isNotBlank()) SpecRow("User Rating", search.ratings)
+                                }
+                            }
+                            if (search.variants.isNotEmpty()) {
+                                DetailSection(title = "Available Variants", icon = "🎨", color = NeonBlue) {
+                                    Text(search.variants.joinToString(" • "), style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f))
+                                }
+                            }
+                        }
+                        ObjectCategory.BOOK -> {
+                            DetailSection(title = "Book Metadata", icon = "📚", color = NeonGreen) {
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    if (search.author.isNotBlank()) SpecRow("Author", search.author)
+                                    if (search.ratings.isNotBlank()) SpecRow("Rating", search.ratings)
+                                    if (search.priceRange.isNotBlank()) SpecRow("Est Price", search.priceRange)
+                                    if (search.launchInfo.isNotBlank()) SpecRow("Published", search.launchInfo)
+                                }
+                            }
+                        }
+                        ObjectCategory.PLANT, ObjectCategory.ANIMAL, ObjectCategory.NATURE -> {
+                            DetailSection(title = "Biological Classification", icon = "🐾", color = NeonGreen) {
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    if (search.scientificName.isNotBlank()) SpecRow("Scientific Name", search.scientificName)
+                                    if (search.habitat.isNotBlank()) SpecRow("Natural Habitat", search.habitat)
+                                    if (search.careInfo.isNotBlank()) SpecRow("Care/Storage Info", search.careInfo)
+                                }
+                            }
+                            if (search.characteristics.isNotEmpty()) {
+                                DetailSection(title = "Key Characteristics", icon = "🧬", color = NeonCyan) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        search.characteristics.forEach { c ->
+                                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                                Box(modifier = Modifier.size(5.dp).clip(CircleShape).background(NeonCyan))
+                                                Text(c, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        ObjectCategory.FOOD -> {
+                            DetailSection(title = "Nutrition Overview", icon = "🍎", color = Color(0xFFFFD700)) {
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    if (search.calories.isNotBlank()) SpecRow("Calories", search.calories)
+                                    search.nutritionalValues.forEach { (k, v) ->
+                                        SpecRow(k, v)
+                                    }
+                                }
+                            }
+                            if (search.healthyAlternatives.isNotEmpty()) {
+                                DetailSection(title = "Healthy Alternatives", icon = "🥗", color = NeonGreen) {
+                                    Text(search.healthyAlternatives.joinToString(", "), style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f))
+                                }
+                            }
+                        }
+                        else -> {}
+                    }
+                    
+                    if (search.specifications.isNotEmpty()) {
+                        DetailSection(title = "Technical Specifications", icon = "🔧", color = Color.White) {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                search.specifications.forEach { (k, v) ->
+                                    SpecRow(k, v)
+                                }
+                            }
+                        }
+                    }
+
+                    if (search.alternatives.isNotEmpty()) {
+                        DetailSection(title = "Similar Alternatives", icon = "🔄", color = NeonPink) {
+                            Text(search.alternatives.joinToString(" • "), style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f))
+                        }
+                    }
+
+                    if (search.brandsAndModels.isNotEmpty()) {
+                        DetailSection(title = "Other Brands & Models", icon = "🏢", color = NeonBlue) {
+                            Text(search.brandsAndModels.joinToString(", "), style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.85f))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SpecRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = Color.White.copy(0.5f))
+        Text(value, style = MaterialTheme.typography.bodySmall, color = Color.White, fontWeight = FontWeight.SemiBold)
     }
 }
 

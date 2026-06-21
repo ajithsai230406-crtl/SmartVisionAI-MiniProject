@@ -27,6 +27,52 @@ data class DetectedItem(
     val accentColor: Long               // ARGB for neon bounding box color
 )
 
+data class WebResult(
+    val title: String,
+    val snippet: String,
+    val url: String
+)
+
+data class RelatedProduct(
+    val name: String,
+    val brand: String,
+    val price: String,
+    val rating: String,
+    val url: String = ""
+)
+
+data class SimilarImage(
+    val title: String,
+    val imageUrl: String,
+    val sourceUrl: String = ""
+)
+
+data class VisualSearchData(
+    val specifications: Map<String, String> = emptyMap(),
+    val alternatives: List<String> = emptyList(),
+    val brandsAndModels: List<String> = emptyList(),
+    val manufacturerInfo: String = "",
+    val ratings: String = "",
+    val priceRange: String = "",
+    val brand: String = "",
+    val ingredients: List<String> = emptyList(),
+    val weight: String = "",
+    val variants: List<String> = emptyList(),
+    val launchInfo: String = "",
+    val author: String = "",
+    val scientificName: String = "",
+    val characteristics: List<String> = emptyList(),
+    val habitat: String = "",
+    val careInfo: String = "",
+    val calories: String = "",
+    val nutritionalValues: Map<String, String> = emptyMap(),
+    val healthyAlternatives: List<String> = emptyList(),
+    val webResults: List<WebResult> = emptyList(),
+    val similarImages: List<SimilarImage> = emptyList(),
+    val relatedProducts: List<RelatedProduct> = emptyList(),
+    val aiSummary: String = ""
+)
+
 /** Rich AI knowledge about a detected object */
 data class ObjectKnowledge(
     val label:                  String,
@@ -41,7 +87,8 @@ data class ObjectKnowledge(
     val buyingSuggestions:      List<String> = emptyList(),
     val relatedRecommendations: List<String> = emptyList(),
     val specializedActionType:  String? = null, // "medicine", "food", "textbook", "waste", "electronics"
-    val specializedActionData:  String? = null  // custom data e.g. nutritional values or maintenance specs
+    val specializedActionData:  String? = null, // custom data e.g. nutritional values or maintenance specs
+    val searchData:             VisualSearchData? = null
 )
 
 /** Scan state machine */
@@ -68,6 +115,14 @@ enum class ObjectCategory(val displayName: String, val colorArgb: Long) {
     SPORTS       ("Sports",       0xFFFF073A),   // Neon red
     NATURE       ("Nature",       0xFF39FF14),   // Neon green
     HOUSEHOLD    ("Household",    0xFF4DEEEA),   // Light cyan
+    BOOK         ("Book",         0xFF00FF7F),   // Spring green
+    PLANT        ("Plant",        0xFF7FFF00),   // Chartreuse
+    CLOTHES      ("Clothes",      0xFFFF69B4),   // Hot pink
+    TOOL         ("Tool",         0xFFB0C4DE),   // Light steel blue
+    MONUMENT     ("Monument",     0xFFD2B48C),   // Tan
+    PRODUCT      ("Product",      0xFFFF8C00),   // Dark orange
+    TOY          ("Toy",          0xFFFF1493),   // Deep pink
+    PACKAGING    ("Packaging",    0xFFE6E6FA),   // Lavender
     OTHER        ("Other",        0xFF7B7BFF)    // Soft blue
 }
 
@@ -80,20 +135,30 @@ fun String.toCategory(): ObjectCategory = when (this.lowercase().trim()) {
     "airplane", "boat"                                             -> ObjectCategory.VEHICLE
     "pizza", "cake", "sandwich", "hot dog", "burger", "apple",
     "banana", "orange", "broccoli", "carrot", "donut", "food",
-    "fresh red apple"                                              -> ObjectCategory.FOOD
+    "fresh red apple", "bread", "fruit", "vegetable"               -> ObjectCategory.FOOD
     "cell phone", "laptop", "tv", "keyboard", "mouse",
     "remote", "microwave", "oven", "toaster", "refrigerator",
     "scientific calculator", "wireless earbuds charging case",
-    "wireless earbuds case", "laptop keyboard"                     -> ObjectCategory.ELECTRONICS
-    "chair", "couch", "bed", "dining table", "toilet"             -> ObjectCategory.FURNITURE
+    "wireless earbuds case", "laptop keyboard", "gadget", "tablet" -> ObjectCategory.ELECTRONICS
+    "chair", "couch", "bed", "dining table", "toilet", "table",
+    "desk", "sofa"                                                 -> ObjectCategory.FURNITURE
     "tennis racket", "baseball bat", "skateboard", "sports ball",
     "frisbee", "skis", "snowboard", "surfboard"                   -> ObjectCategory.SPORTS
-    "potted plant", "tree", "flower"                               -> ObjectCategory.NATURE
+    "potted plant", "tree", "flower", "leaf"                       -> ObjectCategory.NATURE
     "bottle", "cup", "fork", "knife", "spoon", "bowl",
-    "vase", "scissors", "book", "clock", "umbrella", "handbag",
-    "backpack", "suitcase", "tie", "mathematics textbook",
-    "plastic water bottle", "ceramic coffee mug", "coffee mug",
-    "acetaminophen tablet bottle"                                  -> ObjectCategory.HOUSEHOLD
+    "vase", "scissors", "clock", "umbrella", "handbag",
+    "backpack", "suitcase", "tie", "eyeglasses", "glasses",
+    "eye glasses", "ceramic coffee mug", "coffee mug"             -> ObjectCategory.HOUSEHOLD
+    "book", "textbook", "novel", "mathematics textbook"            -> ObjectCategory.BOOK
+    "plant", "indoor plant", "flowerpot", "succulent", "cactus"    -> ObjectCategory.PLANT
+    "clothes", "shirt", "t-shirt", "pants", "jeans", "jacket",
+    "dress", "shoes", "sneakers", "hat"                            -> ObjectCategory.CLOTHES
+    "tool", "hammer", "screwdriver", "wrench", "pliers", "saw"     -> ObjectCategory.TOOL
+    "monument", "statue", "building", "tower", "castle", "bridge"   -> ObjectCategory.MONUMENT
+    "product", "item", "merchandise", "goods"                      -> ObjectCategory.PRODUCT
+    "toy", "action figure", "doll", "teddy bear", "board game"     -> ObjectCategory.TOY
+    "packaging", "box", "carton", "can", "label",
+    "acetaminophen tablet bottle"                                  -> ObjectCategory.PACKAGING
     else                                                           -> ObjectCategory.OTHER
 }
 
@@ -480,6 +545,14 @@ object ObjectKnowledgeBase {
                 ObjectCategory.SPORTS      -> "⚽"
                 ObjectCategory.NATURE      -> "🌿"
                 ObjectCategory.HOUSEHOLD   -> "🏠"
+                ObjectCategory.BOOK        -> "📚"
+                ObjectCategory.PLANT       -> "🪴"
+                ObjectCategory.CLOTHES     -> "👕"
+                ObjectCategory.TOOL        -> "🔧"
+                ObjectCategory.MONUMENT    -> "🏛️"
+                ObjectCategory.PRODUCT     -> "🛍️"
+                ObjectCategory.TOY         -> "🧸"
+                ObjectCategory.PACKAGING   -> "📦"
                 ObjectCategory.OTHER       -> "🔍"
             },
             maintenanceTips = listOf("Inspect periodically for signs of wear and tear", "Keep clean and dry when storing", "Refer to standard owner manuals for detailed service guides"),

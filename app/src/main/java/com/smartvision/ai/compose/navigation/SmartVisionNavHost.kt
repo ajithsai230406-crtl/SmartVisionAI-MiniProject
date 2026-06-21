@@ -26,12 +26,14 @@ import com.smartvision.ai.medicine.ui.MedicineScannerScreen as PremiumMedicineSc
 import com.smartvision.ai.ui.theme.*
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.smartvision.ai.presentation.auth.AuthViewModel
+import com.smartvision.ai.career.ui.*
 
 @Composable
 fun SmartVisionNavHost(
-    isDarkTheme: Boolean,
-    onThemeToggle: () -> Unit
+    themeMode: String,
+    onThemeSelect: (String) -> Unit
 ) {
+    val isDarkTheme = themeMode != "LIGHT"
     android.util.Log.d("SmartVision_Nav", "SmartVisionNavHost composition started")
     val navController  = rememberNavController()
     val currentRoute   = navController.currentBackStackEntryAsState().value?.destination?.route
@@ -43,7 +45,7 @@ fun SmartVisionNavHost(
 
     // Routes that show the bottom nav bar
     val bottomNavRoutes = setOf(
-        Routes.HOME, Routes.AI_ASSISTANT, Routes.HISTORY, Routes.SETTINGS
+        Routes.HOME, Routes.HISTORY, Routes.SETTINGS
     )
     val showBottomNav = currentRoute in bottomNavRoutes
 
@@ -248,15 +250,28 @@ fun SmartVisionNavHost(
 
                 // ── History ──────────────────────────────────────────────────
                 composable(Routes.HISTORY) {
-                    HistoryScreen(onBack = { navController.popBackStack() })
+                    HistoryScreen(
+                        onBack = { navController.popBackStack() },
+                        onNavigateToDetail = { historyId ->
+                            navController.navigate(Routes.historyDetail(historyId))
+                        }
+                    )
+                }
+
+                // ── History Detail (full result restoration) ────────────────
+                composable(
+                    route = Routes.HISTORY_DETAIL,
+                    arguments = listOf(navArgument("historyId") { type = NavType.LongType })
+                ) {
+                    HistoryDetailScreen(onBack = { navController.popBackStack() })
                 }
 
                 // ── Settings ─────────────────────────────────────────────────
                 composable(Routes.SETTINGS) {
                     SettingsScreen(
                         onBack        = { navController.popBackStack() },
-                        isDarkTheme   = isDarkTheme,
-                        onThemeToggle = onThemeToggle,
+                        themeMode     = themeMode,
+                        onThemeSelect = onThemeSelect,
                         onNavigate    = { route -> navController.navigate(route) },
                         onLogout      = {
                             authViewModel.logout {
@@ -315,6 +330,32 @@ fun SmartVisionNavHost(
                 // ── Admin Dashboard ──────────────────────────────────────────
                 composable(Routes.ADMIN_DASHBOARD) {
                     AdminDashboardScreen(onBack = { navController.popBackStack() })
+                }
+
+                // ── Career Assistant ─────────────────────────────────────────
+                composable(Routes.CAREER_ASSISTANT) {
+                    CareerDashboardScreen(onNavigate = { navController.navigate(it) }, onBack = { navController.popBackStack() })
+                }
+                composable(Routes.RESUME_BUILDER) {
+                    ResumeBuilderScreen(onBack = { navController.popBackStack() })
+                }
+                composable(Routes.RESUME_ANALYZER) {
+                    ResumeAnalyzerScreen(onBack = { navController.popBackStack() })
+                }
+                composable(Routes.COVER_LETTER) {
+                    CoverLetterScreen(onBack = { navController.popBackStack() })
+                }
+                composable(Routes.INTERVIEW_PREP) {
+                    InterviewPrepScreen(onBack = { navController.popBackStack() })
+                }
+
+                // ── Feedback UIs ──────────────────────────────────────────────
+                composable(Routes.FEEDBACK) {
+                    FeedbackScreen(onBack = { navController.popBackStack() })
+                }
+
+                composable(Routes.ADMIN_FEEDBACK) {
+                    AdminFeedbackScreen(onBack = { navController.popBackStack() })
                 }
             }
         }

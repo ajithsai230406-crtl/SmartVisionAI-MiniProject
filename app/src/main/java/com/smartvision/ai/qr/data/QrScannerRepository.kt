@@ -44,18 +44,20 @@ class QrScannerRepository @Inject constructor() {
 
     // ── ML Kit Barcode → Domain ───────────────────────────────────────────────
     private fun Barcode.toScannedCode(): ScannedCode {
-        val contentType = when (valueType) {
-            Barcode.TYPE_URL          -> QrContentType.URL
-            Barcode.TYPE_EMAIL        -> QrContentType.EMAIL
-            Barcode.TYPE_PHONE        -> QrContentType.PHONE
-            Barcode.TYPE_SMS          -> QrContentType.SMS
-            Barcode.TYPE_WIFI         -> QrContentType.WIFI
-            Barcode.TYPE_CONTACT_INFO -> QrContentType.CONTACT
-            Barcode.TYPE_GEO          -> QrContentType.GEO
-            Barcode.TYPE_CALENDAR_EVENT -> QrContentType.CALENDAR
-            Barcode.TYPE_TEXT         -> QrContentType.TEXT
-            Barcode.TYPE_PRODUCT      -> QrContentType.PRODUCT
-            else                      -> QrContentType.OTHER
+        val rawVal = rawValue ?: ""
+        val contentType = when {
+            rawVal.startsWith("upi://", ignoreCase = true) -> QrContentType.UPI
+            valueType == Barcode.TYPE_URL          -> QrContentType.URL
+            valueType == Barcode.TYPE_EMAIL        -> QrContentType.EMAIL
+            valueType == Barcode.TYPE_PHONE        -> QrContentType.PHONE
+            valueType == Barcode.TYPE_SMS          -> QrContentType.SMS
+            valueType == Barcode.TYPE_WIFI         -> QrContentType.WIFI
+            valueType == Barcode.TYPE_CONTACT_INFO -> QrContentType.CONTACT
+            valueType == Barcode.TYPE_GEO          -> QrContentType.GEO
+            valueType == Barcode.TYPE_CALENDAR_EVENT -> QrContentType.CALENDAR
+            valueType == Barcode.TYPE_TEXT         -> QrContentType.TEXT
+            valueType == Barcode.TYPE_PRODUCT      -> QrContentType.PRODUCT
+            else                                   -> QrContentType.OTHER
         }
 
         val formatName = when (format) {

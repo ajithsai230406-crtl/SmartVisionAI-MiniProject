@@ -28,10 +28,14 @@ class DocScannerRepository @Inject constructor() {
         filter:   DocumentFilter
     ): Result<ScannedDocument> = withContext(Dispatchers.IO) {
         runCatching {
-            val filteredUris = doc.pages.map { uri ->
-                val bmp     = loadBitmap(context, uri)
-                val filtered = FilterHelper.applyFilter(bmp, filter)
-                saveTempBitmap(context, filtered, "page_${System.currentTimeMillis()}")
+            val filteredUris = if (filter == DocumentFilter.ORIGINAL) {
+                doc.originalPages
+            } else {
+                doc.originalPages.map { uri ->
+                    val bmp     = loadBitmap(context, uri)
+                    val filtered = FilterHelper.applyFilter(bmp, filter)
+                    saveTempBitmap(context, filtered, "page_${System.currentTimeMillis()}")
+                }
             }
             doc.copy(pages = filteredUris, filter = filter)
         }

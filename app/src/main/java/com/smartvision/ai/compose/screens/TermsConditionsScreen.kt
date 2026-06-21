@@ -83,7 +83,7 @@ fun TermsConditionsScreen(onBack: () -> Unit) {
                                 "to scan illegal items, verify unauthorized credentials, or create security compromises. " +
                                 "Users are solely responsible for actions performed using our AI scanning and tutoring features.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White.copy(0.9f),
+                        color = MaterialTheme.colorScheme.onSurface,
                         lineHeight = 20.sp
                     )
                 }
@@ -95,7 +95,7 @@ fun TermsConditionsScreen(onBack: () -> Unit) {
                                 "uploading, or scanning any undesirable, sexually explicit, violent, abusive, or erotic images. " +
                                 "Attempts to bypass safety guardrails to evaluate hazardous content will result in permanent account termination.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White.copy(0.9f),
+                        color = MaterialTheme.colorScheme.onSurface,
                         lineHeight = 20.sp
                     )
                 }
@@ -108,7 +108,7 @@ fun TermsConditionsScreen(onBack: () -> Unit) {
                                 "All OCR translations, homework solves, object identifications, and waste classifications " +
                                 "should be treated as supportive references rather than definitive truths.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White.copy(0.9f),
+                        color = MaterialTheme.colorScheme.onSurface,
                         lineHeight = 20.sp
                     )
                 }
@@ -121,7 +121,7 @@ fun TermsConditionsScreen(onBack: () -> Unit) {
                                 "Users must consult clinical healthcare professionals or refer directly to printed packaging guidelines " +
                                 "before using, purchasing, or dosing any medication.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White.copy(0.9f),
+                        color = MaterialTheme.colorScheme.onSurface,
                         lineHeight = 20.sp
                     )
                 }
@@ -134,7 +134,7 @@ fun TermsConditionsScreen(onBack: () -> Unit) {
                                 "Users agree to follow academic integrity guidelines enforced by their educational institutions " +
                                 "when utilizing our student tools.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White.copy(0.9f),
+                        color = MaterialTheme.colorScheme.onSurface,
                         lineHeight = 20.sp
                     )
                 }
@@ -146,7 +146,7 @@ fun TermsConditionsScreen(onBack: () -> Unit) {
                                 "Document Scanner save features, files are stored on-device inside modern Android Scoped Storage directories. " +
                                 "We are not responsible for files deleted by device cache clearing utilities or user resets.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White.copy(0.9f),
+                        color = MaterialTheme.colorScheme.onSurface,
                         lineHeight = 20.sp
                     )
                 }
@@ -159,7 +159,7 @@ fun TermsConditionsScreen(onBack: () -> Unit) {
                                 "Users may terminate their account and request deletion of stored diagnostic markers at any time " +
                                 "by contacting our support team.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White.copy(0.9f),
+                        color = MaterialTheme.colorScheme.onSurface,
                         lineHeight = 20.sp
                     )
                 }
@@ -172,7 +172,7 @@ fun TermsConditionsScreen(onBack: () -> Unit) {
                                 "inaccurate OCR extractions, medicine scanning oversights, or lost documents. Use of the app is " +
                                 "strictly at your own risk.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White.copy(0.9f),
+                        color = MaterialTheme.colorScheme.onSurface,
                         lineHeight = 20.sp
                     )
                 }

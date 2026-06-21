@@ -93,9 +93,9 @@ fun StudentHelperScreen(
         }
     }
 
-    // Gallery Picker launcher
+    // Gallery Picker launcher (modern)
     val galleryLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri != null) {
             viewModel.processUriForOcr(uri)
@@ -117,7 +117,19 @@ fun StudentHelperScreen(
 
     // CameraX tools
     val cameraRef = remember { mutableStateOf<Camera?>(null) }
-    val imageCapture = remember { ImageCapture.Builder().build() }
+    val imageCapture = remember { ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY).build() }
+    var isTorchOn by remember { mutableStateOf(false) }
+    var useFrontCamera by remember { mutableStateOf(false) }
+
+    // Gallery launcher inside scanner
+    val scannerGalleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.processUriForOcr(uri)
+            isCameraActive = false
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize().background(DeepNavy)) {
         if (isCameraActive) {
@@ -127,27 +139,27 @@ fun StudentHelperScreen(
                     StudentCameraPreview(
                         modifier = Modifier.fillMaxSize(),
                         imageCapture = imageCapture,
+                        useFrontCamera = useFrontCamera,
                         onCameraReady = { cameraRef.value = it }
                     )
 
+                    var manualRectInitialized by remember { mutableStateOf(false) }
+                    var manualRect by remember { mutableStateOf(Rect(150f, 400f, 900f, 1100f)) }
                     var canvasWidth by remember { mutableStateOf(1) }
                     var canvasHeight by remember { mutableStateOf(1) }
-                    val density = LocalDensity.current
 
-                    val defaultRect = remember(canvasWidth, canvasHeight) {
-                        if (canvasWidth > 1 && canvasHeight > 1) {
-                            val cropW = 280.dp.value * density.density
-                            val cropH = 180.dp.value * density.density
-                            val left = (canvasWidth - cropW) / 2f
-                            val top = (canvasHeight - cropH) / 2f
-                            Rect(left, top, left + cropW, top + cropH)
-                        } else {
-                            Rect(150f, 400f, 900f, 1100f)
+                    LaunchedEffect(canvasWidth, canvasHeight) {
+                        if (canvasWidth > 1 && canvasHeight > 1 && !manualRectInitialized) {
+                            val w = canvasWidth * 0.82f
+                            val h = canvasHeight * 0.38f
+                            val l = (canvasWidth - w) / 2f
+                            val t = (canvasHeight - h) / 2f
+                            manualRect = Rect(l, t, l + w, t + h)
+                            manualRectInitialized = true
                         }
                     }
 
-                    var manualRect by remember { mutableStateOf<Rect?>(null) }
-                    val cropRect = manualRect ?: defaultRect
+                    val cropRect = manualRect
 
                     Box(
                         modifier = Modifier
@@ -164,6 +176,43 @@ fun StudentHelperScreen(
                         )
                     }
 
+                    // ── Animated scan line ────────────────────────────────
+                    val infiniteTransition = rememberInfiniteTransition(label = "scanLine")
+                    val scanProgress by infiniteTransition.animateFloat(
+                        initialValue = 0f, targetValue = 1f,
+                        animationSpec = infiniteRepeatable(tween(2200, easing = LinearEasing), RepeatMode.Reverse),
+                        label = "scanLineProgress"
+                    )
+
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val lineY = cropRect.top + (cropRect.height * scanProgress)
+                        if (lineY in cropRect.top..cropRect.bottom) {
+                            drawLine(
+                                brush = Brush.horizontalGradient(
+                                    listOf(Color.Transparent, NeonCyan.copy(0.8f), NeonCyan, NeonCyan.copy(0.8f), Color.Transparent),
+                                    startX = cropRect.left,
+                                    endX = cropRect.right
+                                ),
+                                start = androidx.compose.ui.geometry.Offset(cropRect.left + 8f, lineY),
+                                end = androidx.compose.ui.geometry.Offset(cropRect.right - 8f, lineY),
+                                strokeWidth = 3f,
+                                cap = StrokeCap.Round
+                            )
+                            // Glow effect
+                            drawLine(
+                                brush = Brush.horizontalGradient(
+                                    listOf(Color.Transparent, NeonCyan.copy(0.15f), NeonCyan.copy(0.3f), NeonCyan.copy(0.15f), Color.Transparent),
+                                    startX = cropRect.left,
+                                    endX = cropRect.right
+                                ),
+                                start = androidx.compose.ui.geometry.Offset(cropRect.left + 8f, lineY),
+                                end = androidx.compose.ui.geometry.Offset(cropRect.right - 8f, lineY),
+                                strokeWidth = 18f,
+                                cap = StrokeCap.Round
+                            )
+                        }
+                    }
+
                     // Scan Hint
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         ScanHintLabel(
@@ -172,64 +221,160 @@ fun StudentHelperScreen(
                         )
                     }
 
-                    // Top Bar for Scanner
+                    // ── Top Bar ─── Torch + Title + Camera Switch ─────────
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .statusBarsPadding()
-                            .padding(16.dp),
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        // Back button
                         IconButton(
-                            onClick = { isCameraActive = false },
+                            onClick = { isCameraActive = false; isTorchOn = false },
                             modifier = Modifier
-                                .size(40.dp)
+                                .size(42.dp)
                                 .clip(CircleShape)
-                                .background(Color.Black.copy(0.5f))
+                                .background(Color.Black.copy(0.55f))
+                                .border(1.dp, Color.White.copy(0.15f), CircleShape)
                         ) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Cancel", tint = Color.White)
                         }
+
                         Text(
-                            "Scan Question",
+                            "📷 Scan Question",
                             color = Color.White,
                             fontWeight = FontWeight.Bold,
                             fontSize = 16.sp
                         )
-                        Spacer(Modifier.width(40.dp))
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            // Torch button
+                            IconButton(
+                                onClick = {
+                                    isTorchOn = !isTorchOn
+                                    cameraRef.value?.cameraControl?.enableTorch(isTorchOn)
+                                },
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isTorchOn) NeonOrange.copy(0.3f) else Color.Black.copy(0.55f))
+                                    .border(1.dp, if (isTorchOn) NeonOrange.copy(0.6f) else Color.White.copy(0.15f), CircleShape)
+                            ) {
+                                Text(if (isTorchOn) "🔦" else "🔦", fontSize = 18.sp)
+                            }
+                            // Camera switch
+                            IconButton(
+                                onClick = {
+                                    useFrontCamera = !useFrontCamera
+                                    isTorchOn = false
+                                },
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.Black.copy(0.55f))
+                                    .border(1.dp, Color.White.copy(0.15f), CircleShape)
+                            ) {
+                                Text("🔄", fontSize = 18.sp)
+                            }
+                        }
                     }
 
-                    // Bottom Capture Controls
-                    Box(
+                    // ── Bottom Bar ── Gallery + Capture + Spacer ──────────
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .align(Alignment.BottomCenter)
                             .navigationBarsPadding()
-                            .padding(bottom = 32.dp),
-                        contentAlignment = Alignment.Center
+                            .padding(bottom = 28.dp, start = 40.dp, end = 40.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(76.dp)
-                                .border(4.dp, Color.White, CircleShape)
-                                .padding(6.dp)
-                                .clip(CircleShape)
-                                .background(Color.White)
-                                .clickable {
-                                    captureAndCropPhoto(
-                                        context,
-                                        imageCapture,
-                                        cropRect,
-                                        canvasWidth,
-                                        canvasHeight
-                                    ) { croppedBmp ->
-                                        viewModel.processImageForOcr(croppedBmp)
-                                        isCameraActive = false
-                                    }
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text("📸", fontSize = 28.sp)
+                        // Gallery button
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Box(
+                                modifier = Modifier
+                                    .size(52.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.Black.copy(0.6f))
+                                    .border(2.dp, NeonGreen.copy(0.5f), CircleShape)
+                                    .clickable {
+                                        scannerGalleryLauncher.launch(
+                                            androidx.activity.result.PickVisualMediaRequest(
+                                                ActivityResultContracts.PickVisualMedia.ImageOnly
+                                            )
+                                        )
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("🖼️", fontSize = 22.sp)
+                            }
+                            Spacer(Modifier.height(4.dp))
+                            Text("Gallery", color = Color.White.copy(0.7f), fontSize = 10.sp)
+                        }
+
+                        // Capture button (center, larger)
+                        val captureScale by infiniteTransition.animateFloat(
+                            initialValue = 1f, targetValue = 1.04f,
+                            animationSpec = infiniteRepeatable(tween(1200), RepeatMode.Reverse),
+                            label = "captureBreath"
+                        )
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Box(
+                                modifier = Modifier
+                                    .size(76.dp)
+                                    .scale(captureScale)
+                                    .border(4.dp, NeonCyan, CircleShape)
+                                    .padding(6.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        Brush.radialGradient(
+                                            listOf(NeonCyan.copy(0.9f), NeonPurple.copy(0.7f))
+                                        )
+                                    )
+                                    .clickable {
+                                        // Haptic feedback
+                                        @Suppress("DEPRECATION")
+                                        try {
+                                            val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+                                            vibrator?.vibrate(50L)
+                                        } catch (_: Exception) {}
+
+                                        captureAndCropPhoto(
+                                            context,
+                                            imageCapture,
+                                            cropRect,
+                                            canvasWidth,
+                                            canvasHeight
+                                        ) { croppedBmp ->
+                                            viewModel.processImageForOcr(croppedBmp)
+                                            isCameraActive = false
+                                            isTorchOn = false
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("📸", fontSize = 28.sp)
+                            }
+                            Spacer(Modifier.height(4.dp))
+                            Text("Capture", color = NeonCyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        // Auto-crop info
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Box(
+                                modifier = Modifier
+                                    .size(52.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.Black.copy(0.6f))
+                                    .border(2.dp, NeonPurple.copy(0.5f), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("✂️", fontSize = 22.sp)
+                            }
+                            Spacer(Modifier.height(4.dp))
+                            Text("Auto-Crop", color = Color.White.copy(0.7f), fontSize = 10.sp)
                         }
                     }
                 }
@@ -355,7 +500,13 @@ fun StudentHelperScreen(
 
                                     // Upload Image
                                     IconButton(
-                                        onClick = { galleryLauncher.launch("image/*") },
+                                        onClick = {
+                                            galleryLauncher.launch(
+                                                androidx.activity.result.PickVisualMediaRequest(
+                                                    ActivityResultContracts.PickVisualMedia.ImageOnly
+                                                )
+                                            )
+                                        },
                                         modifier = Modifier
                                             .size(40.dp)
                                             .clip(RoundedCornerShape(8.dp))
@@ -425,190 +576,251 @@ fun StudentHelperScreen(
                             Box(modifier = Modifier.padding(16.dp)) {
                                 when (val state = uiState) {
                                     is StudentUiState.Loading -> {
+                                        // ── Animated loading with progress steps ──
+                                        val loadInf = rememberInfiniteTransition(label = "loadAnim")
+                                        val dotAlpha by loadInf.animateFloat(
+                                            0.3f, 1f,
+                                            infiniteRepeatable(tween(800), RepeatMode.Reverse),
+                                            label = "dotAlpha"
+                                        )
+                                        
                                         Column(
-                                            modifier = Modifier.fillMaxWidth().padding(24.dp),
+                                            modifier = Modifier.fillMaxWidth().padding(20.dp),
                                             horizontalAlignment = Alignment.CenterHorizontally,
                                             verticalArrangement = Arrangement.spacedBy(16.dp)
                                         ) {
-                                            CircularProgressIndicator(color = NeonCyan)
+                                            // Pulsing brain icon
+                                            val brainScale by loadInf.animateFloat(
+                                                0.9f, 1.1f,
+                                                infiniteRepeatable(tween(1000), RepeatMode.Reverse),
+                                                label = "brainScale"
+                                            )
+                                            Text("🧠", fontSize = 42.sp, modifier = Modifier.scale(brainScale))
+                                            
                                             Text(
-                                                "Formulating detailed AI solution...",
-                                                color = Color.White.copy(0.7f),
-                                                fontWeight = FontWeight.Medium
+                                                "AI is analyzing your question...",
+                                                color = NeonCyan,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 15.sp
+                                            )
+                                            
+                                            // Progress steps
+                                            Column(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(12.dp))
+                                                    .background(Color.White.copy(0.04f))
+                                                    .padding(12.dp),
+                                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                listOf(
+                                                    "📷 Capturing image" to true,
+                                                    "📝 Running OCR text extraction" to true,
+                                                    "🤖 AI generating solution..." to true,
+                                                    "✅ Formatting answer" to false
+                                                ).forEachIndexed { idx, (step, done) ->
+                                                    Text(
+                                                        step,
+                                                        color = if (done) NeonGreen.copy(alpha = if (idx == 2) dotAlpha else 0.9f) else Color.White.copy(0.3f),
+                                                        fontSize = 12.sp,
+                                                        fontWeight = if (idx == 2) FontWeight.Bold else FontWeight.Normal
+                                                    )
+                                                }
+                                            }
+                                            
+                                            LinearProgressIndicator(
+                                                modifier = Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)),
+                                                color = NeonCyan,
+                                                trackColor = Color.White.copy(0.08f)
                                             )
                                         }
                                     }
                                     is StudentUiState.Success -> {
-                                        // Parse the response into Solution and Answer sections
+                                        // Parse response into structured sections
                                         val rawResponse = state.response
-                                        val solutionText: String
-                                        val answerText: String
 
-                                        // Parse SOLUTION: and ANSWER: blocks
                                         val solutionRegex = Regex("SOLUTION:(?:\\s*\\n)?(.*?)(?=\\s*ANSWER:|$)", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
-                                        val answerRegex = Regex("ANSWER:(?:\\s*\\n)?(.*)", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
+                                        val answerRegex = Regex("ANSWER:(?:\\s*\\n)?(.*?)(?=\\s*KEY_FORMULA:|\\s*MCQ_ANSWER:|$)", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
+                                        val formulaRegex = Regex("KEY_FORMULA:(?:\\s*\\n)?(.*?)(?=\\s*MCQ_ANSWER:|$)", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
+                                        val mcqRegex = Regex("MCQ_ANSWER:(?:\\s*\\n)?(.*)", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
 
-                                        val solutionMatch = solutionRegex.find(rawResponse)
-                                        val answerMatch = answerRegex.find(rawResponse)
+                                        val solutionText = solutionRegex.find(rawResponse)?.groupValues?.get(1)?.trim() ?: ""
+                                        val answerText = answerRegex.find(rawResponse)?.groupValues?.get(1)?.trim() ?: ""
+                                        val formulaText = formulaRegex.find(rawResponse)?.groupValues?.get(1)?.trim()?.takeIf { it.isNotBlank() && it != "N/A" }
+                                        val mcqAnswer = mcqRegex.find(rawResponse)?.groupValues?.get(1)?.trim()?.takeIf { it.isNotBlank() }
 
-                                        if (solutionMatch != null || answerMatch != null) {
-                                            solutionText = solutionMatch?.groupValues?.get(1)?.trim() ?: ""
-                                            answerText = answerMatch?.groupValues?.get(1)?.trim() ?: ""
-                                        } else {
-                                            // Fallback: show entire response as solution
-                                            solutionText = rawResponse.trim()
-                                            answerText = ""
-                                        }
-
-                                        Column(
-                                            verticalArrangement = Arrangement.spacedBy(16.dp)
-                                        ) {
-                                            // Action buttons row
+                                        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                                            // ── Action buttons row ──────────────────
                                             Row(
                                                 modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.End,
+                                                horizontalArrangement = Arrangement.SpaceBetween,
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                // Read Aloud
-                                                IconButton(onClick = {
-                                                    if (isSpeaking) {
-                                                        viewModel.stopSpeaking()
-                                                        isSpeaking = false
-                                                    } else {
-                                                        viewModel.speak(state.response)
-                                                        isSpeaking = true
-                                                    }
-                                                }, modifier = Modifier.size(32.dp)) {
-                                                    Icon(
-                                                        imageVector = if (isSpeaking) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
-                                                        contentDescription = "Read aloud",
-                                                        tint = if (isSpeaking) NeonCyan else Color.White.copy(0.6f),
-                                                        modifier = Modifier.size(18.dp)
-                                                    )
+                                                // Subject badge
+                                                val subjectEmoji = when {
+                                                    questionText.lowercase().let { q -> q.contains("math") || q.contains("solve") || q.contains("calculate") || q.matches(Regex(".*\\d+\\s*[+\\-*/^]\\s*\\d+.*")) } -> "📐 Math"
+                                                    questionText.lowercase().let { q -> q.contains("physics") || q.contains("force") || q.contains("velocity") } -> "⚛️ Physics"
+                                                    questionText.lowercase().let { q -> q.contains("chemistry") || q.contains("acid") || q.contains("reaction") } -> "🧪 Chemistry"
+                                                    questionText.lowercase().let { q -> q.contains("biology") || q.contains("cell") || q.contains("dna") } -> "🧬 Biology"
+                                                    questionText.lowercase().let { q -> q.contains("code") || q.contains("programming") || q.contains("algorithm") } -> "💻 Code"
+                                                    else -> "🌐 General"
                                                 }
-                                                // Copy
-                                                IconButton(onClick = {
-                                                    clipboardManager.setText(AnnotatedString(state.response))
-                                                    Toast.makeText(context, "Copied to Clipboard", Toast.LENGTH_SHORT).show()
-                                                }, modifier = Modifier.size(32.dp)) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.ContentCopy,
-                                                        contentDescription = "Copy text",
-                                                        tint = Color.White.copy(0.6f),
-                                                        modifier = Modifier.size(18.dp)
-                                                    )
+                                                Box(
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .background(NeonPurple.copy(0.15f))
+                                                        .border(1.dp, NeonPurple.copy(0.3f), RoundedCornerShape(8.dp))
+                                                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                                                ) {
+                                                    Text(subjectEmoji, color = NeonPurple, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                                 }
-                                                // Share
-                                                IconButton(onClick = {
-                                                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                                        type = "text/plain"
-                                                        putExtra(Intent.EXTRA_TEXT, state.response)
+
+                                                Row {
+                                                    IconButton(onClick = {
+                                                        if (isSpeaking) { viewModel.stopSpeaking(); isSpeaking = false }
+                                                        else { viewModel.speak(state.response); isSpeaking = true }
+                                                    }, modifier = Modifier.size(32.dp)) {
+                                                        Icon(
+                                                            imageVector = if (isSpeaking) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
+                                                            contentDescription = "Read aloud",
+                                                            tint = if (isSpeaking) NeonCyan else Color.White.copy(0.6f),
+                                                            modifier = Modifier.size(18.dp)
+                                                        )
                                                     }
-                                                    context.startActivity(Intent.createChooser(shareIntent, "Share solution"))
-                                                }, modifier = Modifier.size(32.dp)) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.Share,
-                                                        contentDescription = "Share text",
-                                                        tint = Color.White.copy(0.6f),
-                                                        modifier = Modifier.size(18.dp)
-                                                    )
+                                                    IconButton(onClick = {
+                                                        clipboardManager.setText(AnnotatedString(state.response))
+                                                        Toast.makeText(context, "Copied to Clipboard", Toast.LENGTH_SHORT).show()
+                                                    }, modifier = Modifier.size(32.dp)) {
+                                                        Icon(Icons.Default.ContentCopy, "Copy", tint = Color.White.copy(0.6f), modifier = Modifier.size(18.dp))
+                                                    }
+                                                    IconButton(onClick = {
+                                                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                                            type = "text/plain"
+                                                            putExtra(Intent.EXTRA_TEXT, state.response)
+                                                        }
+                                                        context.startActivity(Intent.createChooser(shareIntent, "Share solution"))
+                                                    }, modifier = Modifier.size(32.dp)) {
+                                                        Icon(Icons.Default.Share, "Share", tint = Color.White.copy(0.6f), modifier = Modifier.size(18.dp))
+                                                    }
                                                 }
                                             }
 
-                                            // Solution Section
+                                            // ── Solution Section ────────────────────
                                             if (solutionText.isNotBlank()) {
-                                                Text(
-                                                    "Solution:",
-                                                    color = NeonCyan,
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontSize = 16.sp
-                                                )
+                                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                    Text("📝", fontSize = 18.sp)
+                                                    Text("Solution", color = NeonCyan, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                                }
 
-                                                // Parse and display each line of the solution
-                                                val solutionLines = solutionText.lines()
-                                                    .map { it.trim() }
-                                                    .filter { it.isNotBlank() }
-
-                                                Column(
-                                                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                                                ) {
+                                                val solutionLines = solutionText.lines().map { it.trim() }.filter { it.isNotBlank() }
+                                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                                     solutionLines.forEach { line ->
-                                                        // Clean up markdown artifacts like ** and ##
-                                                        val cleanLine = line
-                                                            .replace(Regex("\\*\\*(.*?)\\*\\*"), "$1")
-                                                            .replace(Regex("^#+\\s*"), "")
-                                                            .trim()
-
+                                                        val cleanLine = line.replace(Regex("\\*\\*(.*?)\\*\\*"), "$1").replace(Regex("^#+\\s*"), "").trim()
                                                         if (cleanLine.isNotBlank()) {
-                                                            Text(
-                                                                text = cleanLine,
-                                                                color = Color.White.copy(0.88f),
-                                                                fontSize = 14.sp,
-                                                                lineHeight = 21.sp,
-                                                                fontFamily = FontFamily.SansSerif
-                                                            )
+                                                            val isStep = cleanLine.matches(Regex("^\\d+\\..*"))
+                                                            Row(
+                                                                modifier = Modifier.fillMaxWidth().then(
+                                                                    if (isStep) Modifier.clip(RoundedCornerShape(8.dp)).background(Color.White.copy(0.03f)).padding(horizontal = 10.dp, vertical = 6.dp)
+                                                                    else Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                                                ),
+                                                                verticalAlignment = Alignment.Top
+                                                            ) {
+                                                                if (isStep) {
+                                                                    Box(Modifier.width(3.dp).height(18.dp).clip(RoundedCornerShape(2.dp)).background(NeonCyan.copy(0.6f)))
+                                                                    Spacer(Modifier.width(8.dp))
+                                                                }
+                                                                Text(cleanLine, color = if (isStep) Color.White.copy(0.92f) else Color.White.copy(0.78f),
+                                                                    fontSize = 14.sp, lineHeight = 21.sp,
+                                                                    fontWeight = if (isStep) FontWeight.Medium else FontWeight.Normal,
+                                                                    fontFamily = FontFamily.SansSerif)
+                                                            }
                                                         }
                                                     }
                                                 }
                                             }
 
-                                            // Answer Section
-                                            if (answerText.isNotBlank()) {
-                                                Spacer(modifier = Modifier.height(4.dp))
-
-                                                Text(
-                                                    "Answer:",
-                                                    color = NeonPink,
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontSize = 16.sp
-                                                )
-
-                                                // Clean the answer text
-                                                val cleanAnswer = answerText
-                                                    .replace(Regex("\\*\\*(.*?)\\*\\*"), "$1")
-                                                    .replace(Regex("^#+\\s*"), "")
-                                                    .trim()
-
-                                                Text(
-                                                    text = cleanAnswer,
-                                                    color = NeonCyan,
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontSize = 28.sp,
-                                                    lineHeight = 34.sp,
-                                                    fontFamily = FontFamily.SansSerif
-                                                )
+                                            // ── MCQ Answer highlight ────────────────
+                                            if (mcqAnswer != null) {
+                                                Box(
+                                                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                                                        .background(Brush.horizontalGradient(listOf(NeonGreen.copy(0.12f), NeonCyan.copy(0.08f))))
+                                                        .border(1.5.dp, NeonGreen.copy(0.4f), RoundedCornerShape(12.dp)).padding(14.dp)
+                                                ) {
+                                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                            Text("✅", fontSize = 18.sp)
+                                                            Text("Correct Option", color = NeonGreen, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                                        }
+                                                        Text(mcqAnswer.replace(Regex("\\*\\*(.*?)\\*\\*"), "$1").trim(),
+                                                            color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp, lineHeight = 24.sp)
+                                                    }
+                                                }
                                             }
 
-                                            // Fallback: if no structured sections were found, show raw
+                                            // ── Answer Section ──────────────────────
+                                            if (answerText.isNotBlank()) {
+                                                Box(
+                                                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                                                        .background(Brush.linearGradient(listOf(NeonCyan.copy(0.12f), NeonPurple.copy(0.08f))))
+                                                        .border(1.5.dp, NeonCyan.copy(0.35f), RoundedCornerShape(14.dp)).padding(16.dp)
+                                                ) {
+                                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                            Text("🎯", fontSize = 18.sp)
+                                                            Text("Answer", color = NeonCyan, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                                        }
+                                                        val cleanAnswer = answerText.replace(Regex("\\*\\*(.*?)\\*\\*"), "$1")
+                                                            .replace(Regex("^#+\\s*"), "")
+                                                            .replace(Regex("KEY_FORMULA:.*", RegexOption.DOT_MATCHES_ALL), "").trim()
+                                                        Text(cleanAnswer, color = Color.White, fontWeight = FontWeight.ExtraBold,
+                                                            fontSize = 26.sp, lineHeight = 32.sp, fontFamily = FontFamily.SansSerif)
+                                                    }
+                                                }
+                                            }
+
+                                            // ── Key Formula card ────────────────────
+                                            if (formulaText != null) {
+                                                Box(
+                                                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                                                        .background(NeonOrange.copy(0.08f))
+                                                        .border(1.dp, NeonOrange.copy(0.3f), RoundedCornerShape(12.dp)).padding(14.dp)
+                                                ) {
+                                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                            Text("📐", fontSize = 16.sp)
+                                                            Text("Key Formula", color = NeonOrange, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                                        }
+                                                        Text(formulaText.replace(Regex("\\*\\*(.*?)\\*\\*"), "$1").trim(),
+                                                            color = Color.White.copy(0.9f), fontSize = 14.sp, lineHeight = 20.sp, fontFamily = FontFamily.Monospace)
+                                                    }
+                                                }
+                                            }
+
+                                            // Fallback
                                             if (solutionText.isBlank() && answerText.isBlank()) {
-                                                Text(
-                                                    text = rawResponse,
-                                                    color = Color.White.copy(0.9f),
-                                                    fontSize = 14.sp,
-                                                    lineHeight = 22.sp,
-                                                    fontFamily = FontFamily.SansSerif
-                                                )
+                                                Text(rawResponse, color = Color.White.copy(0.9f), fontSize = 14.sp, lineHeight = 22.sp, fontFamily = FontFamily.SansSerif)
                                             }
                                         }
                                     }
                                     is StudentUiState.Error -> {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(NeonPink.copy(0.15f))
-                                                .border(1.dp, NeonPink.copy(0.3f), RoundedCornerShape(8.dp))
-                                                .padding(12.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        Column(
+                                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                                                .background(NeonPink.copy(0.1f))
+                                                .border(1.dp, NeonPink.copy(0.3f), RoundedCornerShape(12.dp)).padding(16.dp),
+                                            verticalArrangement = Arrangement.spacedBy(10.dp)
                                         ) {
-                                            Text("⚠️", fontSize = 18.sp)
-                                            Text(
-                                                text = state.message,
-                                                color = NeonPink,
-                                                fontWeight = FontWeight.Medium,
-                                                fontSize = 14.sp
-                                            )
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                Text("⚠️", fontSize = 22.sp)
+                                                Text("Error", color = NeonPink, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                            }
+                                            Text(state.message, color = Color.White.copy(0.8f), fontWeight = FontWeight.Medium, fontSize = 14.sp, lineHeight = 20.sp)
+                                            Box(
+                                                Modifier.clip(RoundedCornerShape(10.dp)).background(NeonCyan.copy(0.12f))
+                                                    .border(1.dp, NeonCyan.copy(0.3f), RoundedCornerShape(10.dp))
+                                                    .clickable { viewModel.generateAnswer() }.padding(horizontal = 20.dp, vertical = 10.dp)
+                                            ) {
+                                                Text("🔄 Try Again", color = NeonCyan, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                            }
                                         }
                                     }
                                     else -> {}
@@ -688,6 +900,24 @@ fun StudentHelperScreen(
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 firestoreHistoryList.forEach { historyItem ->
+                                    // Subject emoji for history cards
+                                    val histSubjectEmoji = when (historyItem.subject.lowercase()) {
+                                        "mathematics" -> "📐"
+                                        "physics" -> "⚛️"
+                                        "chemistry" -> "🧪"
+                                        "biology" -> "🧬"
+                                        "programming" -> "💻"
+                                        else -> "🌐"
+                                    }
+                                    val histAccentColor = when (historyItem.subject.lowercase()) {
+                                        "mathematics" -> NeonCyan
+                                        "physics" -> NeonBlue
+                                        "chemistry" -> NeonGreen
+                                        "biology" -> NeonPurple
+                                        "programming" -> NeonOrange
+                                        else -> NeonCyan
+                                    }
+
                                     Card(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -695,60 +925,98 @@ fun StudentHelperScreen(
                                                 viewModel.reopenHistoryItem(historyItem)
                                                 isSpeaking = false
                                             }
-                                            .border(1.dp, Color.White.copy(0.08f), RoundedCornerShape(12.dp)),
+                                            .border(1.dp, histAccentColor.copy(0.15f), RoundedCornerShape(12.dp)),
                                         colors = CardDefaults.cardColors(containerColor = Color.White.copy(0.03f)),
                                         shape = RoundedCornerShape(12.dp)
                                     ) {
-                                        Row(
-                                            modifier = Modifier.padding(12.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Column(
-                                                modifier = Modifier.weight(1f),
-                                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                                        Row(modifier = Modifier.fillMaxWidth()) {
+                                            // Left accent bar
+                                            Box(
+                                                modifier = Modifier
+                                                    .width(4.dp)
+                                                    .height(80.dp)
+                                                    .background(
+                                                        Brush.verticalGradient(listOf(histAccentColor.copy(0.7f), histAccentColor.copy(0.15f))),
+                                                        RoundedCornerShape(topStart = 12.dp, bottomStart = 12.dp)
+                                                    )
+                                            )
+
+                                            Row(
+                                                modifier = Modifier.weight(1f).padding(12.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween
                                             ) {
-                                                Row(
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                Column(
+                                                    modifier = Modifier.weight(1f),
+                                                    verticalArrangement = Arrangement.spacedBy(4.dp)
                                                 ) {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .background(Color.White.copy(0.1f), RoundedCornerShape(4.dp))
-                                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                                                     ) {
-                                                        Text(
-                                                            text = historyItem.subject.uppercase(),
-                                                            color = NeonCyan,
-                                                            fontSize = 8.sp,
-                                                            fontWeight = FontWeight.Bold
-                                                        )
+                                                        // Subject emoji badge
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .background(histAccentColor.copy(0.12f), RoundedCornerShape(6.dp))
+                                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                        ) {
+                                                            Text(
+                                                                "$histSubjectEmoji ${historyItem.subject.uppercase()}",
+                                                                color = histAccentColor,
+                                                                fontSize = 9.sp,
+                                                                fontWeight = FontWeight.Bold
+                                                            )
+                                                        }
                                                     }
+
+                                                    // Question text
                                                     Text(
                                                         text = historyItem.question,
                                                         color = Color.White,
                                                         fontWeight = FontWeight.Medium,
                                                         fontSize = 14.sp,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis,
-                                                        modifier = Modifier.weight(1f)
+                                                        maxLines = 2,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+
+                                                    // Answer preview (first 2 lines)
+                                                    if (historyItem.answer.isNotBlank()) {
+                                                        val answerPreview = historyItem.answer
+                                                            .replace(Regex("SOLUTION:|ANSWER:|KEY_FORMULA:|MCQ_ANSWER:", RegexOption.IGNORE_CASE), "")
+                                                            .trim()
+                                                            .lines()
+                                                            .filter { it.isNotBlank() }
+                                                            .take(1)
+                                                            .joinToString(" ")
+                                                        if (answerPreview.isNotBlank()) {
+                                                            Text(
+                                                                "💡 $answerPreview",
+                                                                color = Color.White.copy(0.45f),
+                                                                fontSize = 11.sp,
+                                                                maxLines = 1,
+                                                                overflow = TextOverflow.Ellipsis
+                                                            )
+                                                        }
+                                                    }
+
+                                                    // Timestamp
+                                                    Text(
+                                                        text = java.text.SimpleDateFormat("dd MMM yyyy, hh:mm a", java.util.Locale.getDefault()).format(
+                                                            java.util.Date(historyItem.timestamp)
+                                                        ),
+                                                        color = Color.White.copy(0.35f),
+                                                        fontSize = 10.sp
                                                     )
                                                 }
-                                                Text(
-                                                    text = java.text.SimpleDateFormat("dd MMM yyyy, hh:mm a", java.util.Locale.getDefault()).format(
-                                                        java.util.Date(historyItem.timestamp)
-                                                    ),
-                                                    color = Color.White.copy(0.4f),
-                                                    fontSize = 11.sp
-                                                )
-                                            }
 
-                                            IconButton(onClick = { viewModel.deleteHistoryItem(historyItem.id) }) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Delete,
-                                                    contentDescription = "Delete record",
-                                                    tint = Color.White.copy(0.35f)
-                                                )
+                                                IconButton(onClick = { viewModel.deleteHistoryItem(historyItem.id) }) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Delete,
+                                                        contentDescription = "Delete record",
+                                                        tint = Color.White.copy(0.3f),
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
                                             }
                                         }
                                     }
@@ -792,10 +1060,12 @@ fun StudentHelperScreen(
 private fun StudentCameraPreview(
     modifier: Modifier,
     imageCapture: ImageCapture,
+    useFrontCamera: Boolean = false,
     onCameraReady: (Camera) -> Unit
 ) {
     val ctx = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val cameraSelector = if (useFrontCamera) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA
 
     DisposableEffect(lifecycleOwner) {
         onDispose {
@@ -813,28 +1083,39 @@ private fun StudentCameraPreview(
     AndroidView(
         modifier = modifier,
         factory = { context ->
-            val preview = PreviewView(context).apply {
+            PreviewView(context).apply {
                 layoutParams = ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
                 scaleType = PreviewView.ScaleType.FILL_CENTER
             }
-            ProcessCameraProvider.getInstance(context).addListener({
-                val provider = ProcessCameraProvider.getInstance(context).get()
+        },
+        update = { preview ->
+            val future = ProcessCameraProvider.getInstance(ctx)
+            future.addListener({
+                val provider = future.get()
                 provider.unbindAll()
 
                 val previewUC = Preview.Builder().build()
                     .also { it.setSurfaceProvider(preview.surfaceProvider) }
 
-                val cam = provider.bindToLifecycle(
-                    lifecycleOwner,
-                    CameraSelector.DEFAULT_BACK_CAMERA,
-                    previewUC, imageCapture
-                )
-                onCameraReady(cam)
-            }, ContextCompat.getMainExecutor(context))
-            preview
+                try {
+                    val cam = provider.bindToLifecycle(
+                        lifecycleOwner,
+                        cameraSelector,
+                        previewUC, imageCapture
+                    )
+                    // Enable continuous auto-focus
+                    val point = SurfaceOrientedMeteringPointFactory(1f, 1f).createPoint(0.5f, 0.5f)
+                    cam.cameraControl.startFocusAndMetering(
+                        FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF)
+                            .setAutoCancelDuration(3, java.util.concurrent.TimeUnit.SECONDS)
+                            .build()
+                    )
+                    onCameraReady(cam)
+                } catch (_: Exception) {}
+            }, ContextCompat.getMainExecutor(ctx))
         }
     )
 }
@@ -849,7 +1130,7 @@ private fun ResizableViewfinder(
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
-    val handleSize = 44.dp
+    val handleSize = 48.dp
     val thick = 4.dp
     val rad = 12.dp
 
@@ -960,71 +1241,56 @@ private fun ResizableViewfinder(
                 lineTo(rect.right, rect.bottom - len)
             }
             drawPath(brPath, NeonCyan, style = Stroke(width = thickPx, cap = StrokeCap.Round))
+
+            // Visible handle circles
+            val handleRadius = 6.dp.toPx()
+            drawCircle(NeonCyan, handleRadius, rect.topLeft)
+            drawCircle(NeonCyan, handleRadius, rect.topRight)
+            drawCircle(NeonCyan, handleRadius, rect.bottomLeft)
+            drawCircle(NeonCyan, handleRadius, rect.bottomRight)
         }
 
-        val handleSizePx = with(density) { handleSize.toPx() }
-
-        // Draggable corners
-        // Top-Left
-        Box(
-            modifier = Modifier
-                .offset { IntOffset((rect.left - handleSizePx / 2).toInt(), (rect.top - handleSizePx / 2).toInt()) }
-                .size(handleSize)
-                .pointerInput(rect) {
-                    detectDragGestures { change, dragAmount ->
-                        change.consume()
-                        val newLeft = (rect.left + dragAmount.x).coerceAtMost(rect.right - 160f).coerceAtLeast(20f)
-                        val newTop = (rect.top + dragAmount.y).coerceAtMost(rect.bottom - 160f).coerceAtLeast(120f)
-                        onRectChange(Rect(newLeft, newTop, rect.right, rect.bottom))
-                    }
-                }
-        )
-
-        // Top-Right
-        Box(
-            modifier = Modifier
-                .offset { IntOffset((rect.right - handleSizePx / 2).toInt(), (rect.top - handleSizePx / 2).toInt()) }
-                .size(handleSize)
-                .pointerInput(rect) {
-                    detectDragGestures { change, dragAmount ->
-                        change.consume()
-                        val newRight = (rect.right + dragAmount.x).coerceAtLeast(rect.left + 160f).coerceAtMost(widthPx - 20f)
-                        val newTop = (rect.top + dragAmount.y).coerceAtMost(rect.bottom - 160f).coerceAtLeast(120f)
-                        onRectChange(Rect(rect.left, newTop, newRight, rect.bottom))
-                    }
-                }
-        )
-
-        // Bottom-Left
-        Box(
-            modifier = Modifier
-                .offset { IntOffset((rect.left - handleSizePx / 2).toInt(), (rect.bottom - handleSizePx / 2).toInt()) }
-                .size(handleSize)
-                .pointerInput(rect) {
-                    detectDragGestures { change, dragAmount ->
-                        change.consume()
-                        val newLeft = (rect.left + dragAmount.x).coerceAtMost(rect.right - 160f).coerceAtLeast(20f)
-                        val newBottom = (rect.bottom + dragAmount.y).coerceAtLeast(rect.top + 160f).coerceAtMost(heightPx - 220f)
-                        onRectChange(Rect(newLeft, rect.top, rect.right, newBottom))
-                    }
-                }
-        )
-
-        // Bottom-Right
-        Box(
-            modifier = Modifier
-                .offset { IntOffset((rect.right - handleSizePx / 2).toInt(), (rect.bottom - handleSizePx / 2).toInt()) }
-                .size(handleSize)
-                .pointerInput(rect) {
-                    detectDragGestures { change, dragAmount ->
-                        change.consume()
-                        val newRight = (rect.right + dragAmount.x).coerceAtLeast(rect.left + 160f).coerceAtMost(widthPx - 20f)
-                        val newBottom = (rect.bottom + dragAmount.y).coerceAtLeast(rect.top + 160f).coerceAtMost(heightPx - 220f)
-                        onRectChange(Rect(rect.left, rect.top, newRight, newBottom))
-                    }
-                }
-        )
+        // Corner resize handles
+        CornerHandle(rect.left, rect.top, handleSize, rect) { d ->
+            val newLeft = (rect.left + d.x).coerceAtMost(rect.right - 160f).coerceAtLeast(20f)
+            val newTop = (rect.top + d.y).coerceAtMost(rect.bottom - 160f).coerceAtLeast(120f)
+            onRectChange(Rect(newLeft, newTop, rect.right, rect.bottom))
+        }
+        CornerHandle(rect.right, rect.top, handleSize, rect) { d ->
+            val newRight = (rect.right + d.x).coerceAtLeast(rect.left + 160f).coerceAtMost(widthPx - 20f)
+            val newTop = (rect.top + d.y).coerceAtMost(rect.bottom - 160f).coerceAtLeast(120f)
+            onRectChange(Rect(rect.left, newTop, newRight, rect.bottom))
+        }
+        CornerHandle(rect.left, rect.bottom, handleSize, rect) { d ->
+            val newLeft = (rect.left + d.x).coerceAtMost(rect.right - 160f).coerceAtLeast(20f)
+            val newBottom = (rect.bottom + d.y).coerceAtLeast(rect.top + 160f).coerceAtMost(heightPx - 220f)
+            onRectChange(Rect(newLeft, rect.top, rect.right, newBottom))
+        }
+        CornerHandle(rect.right, rect.bottom, handleSize, rect) { d ->
+            val newRight = (rect.right + d.x).coerceAtLeast(rect.left + 160f).coerceAtMost(widthPx - 20f)
+            val newBottom = (rect.bottom + d.y).coerceAtLeast(rect.top + 160f).coerceAtMost(heightPx - 220f)
+            onRectChange(Rect(rect.left, rect.top, newRight, newBottom))
+        }
     }
+}
+
+@Composable
+private fun CornerHandle(
+    x: Float,
+    y: Float,
+    handleSize: androidx.compose.ui.unit.Dp,
+    rect: Rect,
+    onDrag: (Offset) -> Unit
+) {
+    val density = LocalDensity.current
+    val handleSizePx = with(density) { handleSize.toPx() }
+    Box(modifier = Modifier
+        .offset { IntOffset((x - handleSizePx / 2).toInt(), (y - handleSizePx / 2).toInt()) }
+        .size(handleSize)
+        .pointerInput(rect) {
+            detectDragGestures { c, d -> c.consume(); onDrag(d) }
+        }
+    )
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

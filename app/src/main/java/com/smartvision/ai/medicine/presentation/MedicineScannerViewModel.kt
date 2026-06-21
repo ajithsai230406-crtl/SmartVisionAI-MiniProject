@@ -106,7 +106,11 @@ class MedicineScannerViewModel @Inject constructor(
                 _state.value = MedicineScanState.Result(info)
             }.onFailure { e ->
                 showCamera = false
-                _state.value = MedicineScanState.Error(e.message ?: "OCR analysis failed")
+                if (e is MedicineScannerRepository.MedicineRejectionException) {
+                    _state.value = MedicineScanState.NotMedicine(e.message ?: "No medicine detected")
+                } else {
+                    _state.value = MedicineScanState.Error(e.message ?: "OCR analysis failed")
+                }
             }
         }
     }

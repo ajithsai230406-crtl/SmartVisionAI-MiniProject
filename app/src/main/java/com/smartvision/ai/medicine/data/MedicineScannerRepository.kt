@@ -172,6 +172,50 @@ class MedicineScannerRepository @Inject constructor(
         identifyBrandAndGeneric(ocrText)
     }
 
+    // ── Medicine Detection Heuristic ───────────────────────────────────────────
+    private val MEDICINE_KEYWORDS = setOf(
+        "mg", "ml", "mcg", "tablet", "tablets", "capsule", "capsules", "syrup",
+        "injection", "ointment", "drops", "inhaler", "patch", "powder", "suppository",
+        "dosage", "dose", "composition", "each", "contains", "active ingredient",
+        "excipient", "rx", "prescription", "otc", "medicine", "drug", "pharmaceutical",
+        "expiry", "exp", "mfg", "manufactured", "batch", "lot", "storage", "store below",
+        "keep out of reach", "side effects", "contraindications", "indications",
+        "warnings", "precautions", "directions", "use as directed",
+        "paracetamol", "ibuprofen", "amoxicillin", "cetirizine", "omeprazole",
+        "metformin", "atorvastatin", "pantoprazole", "azithromycin", "aspirin",
+        "acetaminophen", "antibiotic", "analgesic", "antipyretic", "antacid",
+        "usp", "ip", "bp", "nf", "pharmacopoeia"
+    )
+
+    fun isMedicineOrProduct(ocrText: String): Boolean {
+        val lower = ocrText.lowercase()
+        var matchCount = 0
+        for (keyword in MEDICINE_KEYWORDS) {
+            if (lower.contains(keyword)) matchCount++
+            if (matchCount >= 2) return true
+        }
+        // Also check if local DB recognizes any brand/generic name
+        val parseResult = identifyBrandAndGeneric(ocrText)
+        return parseResult.brandName != null || parseResult.genericName != null
+    }
+
+    private suspend fun verifyWithAi(ocrText: String): Boolean {
+        if (!isOnline()) return false
+        return try {
+            val prompt = """
+                You are an image content classifier. Given this OCR text extracted from a photo, determine if the text comes from a medicine package, pharmaceutical product, health supplement label, or any medical product.
+                
+                OCR Text: "$ocrText"
+                
+                Reply ONLY with "YES" if this is from a medicine/health product, or "NO" if it appears to be from a random object, book, sign, receipt, or non-medical item.
+            """.trimIndent()
+            val response = openRouterManager.generateContent(prompt, modelName = "openrouter/auto")
+            response.trim().uppercase().startsWith("YES")
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     // ── Core: Analyze from Bitmap (with preprocessing, OCR & extraction) ──────
     suspend fun analyzeFromBitmap(bitmap: Bitmap, onProgress: (Float) -> Unit): Result<MedicineInfo> =
         withContext(Dispatchers.IO) {
@@ -197,7 +241,7 @@ class MedicineScannerRepository @Inject constructor(
                     return@withContext Result.failure(it)
                 }
             
-            onProgress(0.4f)
+            onProgress(0.3f)
             val ocrText = ocrResult.text.trim()
 
             // 2. Compute average OCR confidence
@@ -213,27 +257,41 @@ class MedicineScannerRepository @Inject constructor(
             }
             val avgConfidence = if (count > 0) totalConfidence / count else 0f
 
-            // Detailed Log: OCR Extraction (Requirement 9)
+            // Detailed Log: OCR Extraction
             android.util.Log.i("MedicineScanner", "[OCR Extraction] Raw Text:\n$ocrText\n[OCR Metrics] Image dimensions: ${bitmap.width}x${bitmap.height}, Average Element Confidence: $avgConfidence")
 
             if (ocrText.isBlank()) {
                 return@withContext Result.failure(Exception("No text detected. Please recapture with a clearer image of the medicine package."))
             }
 
-            // Low confidence guard (Requirement 5)
+            // Low confidence guard
             if (avgConfidence < 0.45f) {
                 return@withContext Result.failure(Exception("OCR confidence is too low (${(avgConfidence * 100).toInt()}%). Please recapture the image in a well-lit area and make sure the text is in focus."))
             }
 
+            onProgress(0.45f)
+
+            // 3. Medicine detection gate — reject non-medicine objects
+            val isMedicine = isMedicineOrProduct(ocrText)
+            if (!isMedicine) {
+                // Second chance: ask AI to verify
+                val aiVerified = verifyWithAi(ocrText)
+                if (!aiVerified) {
+                    return@withContext Result.failure(
+                        MedicineRejectionException("No medicine or supported product detected. The scanned image does not appear to contain a medicine label or health product packaging.")
+                    )
+                }
+            }
+
             onProgress(0.6f)
 
-            // 3. Extract medicine name
+            // 4. Extract medicine name
             val medName = extractMedicineName(ocrText)
             android.util.Log.i("MedicineScanner", "[OCR Extraction] Identified Medicine Name: '$medName'")
 
             onProgress(0.8f)
 
-            // 4. Local Database Matching
+            // 5. Local Database Matching
             var offlineMatch: MedicineInfo? = null
             
             // Search local databases first
@@ -250,11 +308,14 @@ class MedicineScannerRepository @Inject constructor(
                 offlineMatch = MedicineDatabase.findByName(brand)
             }
 
-            // 5. FDA and Gemini analysis
+            // 6. FDA and Gemini analysis
             val result = analyzeWithFdaAndGemini(medName, rawOcrText = ocrText, offlineMatch = offlineMatch, imageUrl = downloadUrl)
             onProgress(1.0f)
             result
         }
+
+    /** Custom exception for non-medicine rejections so ViewModel can distinguish it */
+    class MedicineRejectionException(message: String) : Exception(message)
 
     private suspend fun extractMedicineName(ocrText: String): String {
         // Try local matching first
@@ -476,7 +537,9 @@ CRITICAL: Respond ONLY with valid JSON (no markdown, no backticks). Use this exa
   "safetyScore": 8,
   "safetyLevel": "SAFE",
   "emergencyWarning": null,
-  "aiSummary": "2-3 sentence plain-English summary for patients"
+  "aiSummary": "2-3 sentence plain-English summary for patients",
+  "manufacturer": "Manufacturer or pharmaceutical company name",
+  "alternatives": ["Alternative medicine 1", "Alternative medicine 2", "Alternative medicine 3"]
 }
 
 SAFETY RULES:
@@ -486,6 +549,8 @@ SAFETY RULES:
 - safetyLevel must be one of: SAFE, MODERATE, CAUTION, DANGER
 - medicineType must be one of: TABLET, CAPSULE, SYRUP, INJECTION, OINTMENT, DROPS, INHALER, PATCH, POWDER, SUPPOSITORY
 - sideEffectSeverities must map each of the sideEffects to either "Common", "Uncommon", or "Rare/Severe".
+- manufacturer should be the known pharma company (e.g. GSK, Pfizer, Cipla, Sun Pharma). If unknown, use "Various manufacturers".
+- alternatives should list 2-5 similar medicines that serve the same therapeutic purpose.
 """.trimIndent()
 
     private fun buildGeminiPromptWithFda(query: String, fdaData: String) = """
@@ -527,7 +592,9 @@ CRITICAL: Respond ONLY with valid JSON (no markdown, no backticks). Use this exa
   "safetyScore": 8,
   "safetyLevel": "SAFE",
   "emergencyWarning": null,
-  "aiSummary": "2-3 sentence plain-English summary for patients"
+  "aiSummary": "2-3 sentence plain-English summary for patients",
+  "manufacturer": "Manufacturer or pharmaceutical company name",
+  "alternatives": ["Alternative medicine 1", "Alternative medicine 2", "Alternative medicine 3"]
 }
 
 SAFETY RULES:
@@ -537,6 +604,8 @@ SAFETY RULES:
 - safetyLevel must be one of: SAFE, MODERATE, CAUTION, DANGER
 - medicineType must be one of: TABLET, CAPSULE, SYRUP, INJECTION, OINTMENT, DROPS, INHALER, PATCH, POWDER, SUPPOSITORY
 - sideEffectSeverities must map each of the sideEffects to either "Common", "Uncommon", or "Rare/Severe".
+- manufacturer should be the known pharma company. If unknown, use "Various manufacturers".
+- alternatives should list 2-5 similar medicines that serve the same therapeutic purpose.
 """.trimIndent()
 
     private fun applyDosageSafetyChecks(info: MedicineInfo): MedicineInfo {
@@ -682,7 +751,9 @@ SAFETY RULES:
             rawOcrText       = rawOcrText,
             disclaimer       = DISCLAIMER,
             sideEffectSeverities = sideEffectSeveritiesMap,
-            interactionWarnings = interactionWarningsList
+            interactionWarnings = interactionWarningsList,
+            manufacturer     = j.optString("manufacturer",     ""),
+            alternatives     = arr("alternatives")
         )
     }
 
@@ -750,7 +821,30 @@ SAFETY RULES:
 
         // Generic history entry (in-app History tab)
         runCatching {
-            historyRepository.save("Medicine", info.name, "Safety ${info.safetyScore}/10 · ${info.category}")
+            val medHistJson = com.smartvision.ai.domain.model.HistoryJsonSerializer.serializeMedicine(
+                com.smartvision.ai.domain.model.MedicineHistoryDetail(
+                    name = info.name,
+                    genericName = info.genericName,
+                    category = info.category,
+                    composition = info.composition,
+                    dosage = info.dosage,
+                    frequency = info.frequency,
+                    uses = info.uses,
+                    sideEffects = info.sideEffects,
+                    warnings = info.warnings,
+                    interactions = info.interactions,
+                    safetyScore = info.safetyScore,
+                    safetyLevel = info.safetyLevel.name,
+                    aiSummary = info.aiSummary,
+                    storageInfo = info.storageInfo,
+                    prescriptionOnly = info.prescriptionOnly,
+                    whoShouldAvoid = info.whoShouldAvoid,
+                    emergencyWarning = info.emergencyWarning,
+                    manufacturer = info.manufacturer,
+                    alternatives = info.alternatives
+                )
+            )
+            historyRepository.save("Medicine", info.name, "Safety ${info.safetyScore}/10 · ${info.category}", medHistJson)
         }
 
         // Structured Firebase entry — rich medicine data
@@ -873,6 +967,11 @@ SAFETY RULES:
         info.interactionWarnings.forEach { interactionWarningsArr.put(it) }
         j.put("interactionWarnings", interactionWarningsArr)
 
+        j.put("manufacturer", info.manufacturer)
+        val alternativesArr = JSONArray()
+        info.alternatives.forEach { alternativesArr.put(it) }
+        j.put("alternatives", alternativesArr)
+
         return j
     }
 
@@ -931,7 +1030,9 @@ SAFETY RULES:
             rawOcrText = j.optString("rawOcrText", ""),
             confidenceScore = j.optInt("confidenceScore", 100),
             sideEffectSeverities = sideEffectSeveritiesMap,
-            interactionWarnings = toList(j.optJSONArray("interactionWarnings"))
+            interactionWarnings = toList(j.optJSONArray("interactionWarnings")),
+            manufacturer = j.optString("manufacturer", ""),
+            alternatives = toList(j.optJSONArray("alternatives"))
         )
     }
 
@@ -954,7 +1055,16 @@ SAFETY RULES:
     }
 
     // ── Search suggestions ────────────────────────────────────────────────────
-    fun getSearchSuggestions(query: String): List<String> =
-        if (query.length < 2) listOf("Paracetamol", "Ibuprofen", "Amoxicillin", "Cetirizine", "Omeprazole", "Metformin")
-        else MedicineDatabase.searchAll(query).map { it.name }
+    fun getSearchSuggestions(query: String): List<String> {
+        if (query.length < 2) return listOf("Paracetamol", "Ibuprofen", "Amoxicillin", "Cetirizine", "Omeprazole", "Metformin")
+        // Search across both databases with symptoms + manufacturer matching
+        val dailyMatches = DailyMedicinesDatabase.dailyMedicines.filter { med ->
+            med.name.contains(query, true) || med.genericName.contains(query, true) ||
+            med.brandName.contains(query, true) || med.manufacturer.contains(query, true) ||
+            med.uses.any { it.contains(query, true) } ||
+            med.symptomsItTreats.any { it.contains(query, true) }
+        }.map { it.name }
+        val dbMatches = MedicineDatabase.searchAll(query).map { it.name }
+        return (dailyMatches + dbMatches).distinct().take(8)
+    }
 }

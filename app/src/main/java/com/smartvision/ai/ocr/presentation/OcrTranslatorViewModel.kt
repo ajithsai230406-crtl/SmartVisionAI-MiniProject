@@ -70,6 +70,11 @@ class OcrTranslatorViewModel @Inject constructor(
     private val _targetLanguage = MutableStateFlow("Hindi")
     val targetLanguage: StateFlow<String> = _targetLanguage.asStateFlow()
 
+    /** BCP-47 code derived from display name — used for TTS and for UI */
+    val targetLanguageCode: StateFlow<String> = _targetLanguage.map { displayName ->
+        ALL_LANGUAGES.firstOrNull { it.displayName.equals(displayName, ignoreCase = true) }?.code ?: "hi"
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, "hi")
+
     // ── Source Language ───────────────────────────────────────────────────────
     private val _sourceLanguage = MutableStateFlow<Language>(Language("auto", "Auto-detect", "🌐", "Auto"))
     val sourceLanguage: StateFlow<Language> = _sourceLanguage.asStateFlow()
@@ -141,13 +146,14 @@ class OcrTranslatorViewModel @Inject constructor(
         imageHeight.value = height
 
         val selectedSourceCode = _sourceLanguage.value.code
-        val script = if (selectedSourceCode == "auto") {
-            activeAutoScript.value
+        val ocrResult = if (selectedSourceCode == "auto") {
+            ocrRepo.recognizeAutoScriptFromImage(image, rotation)
         } else {
-            OcrScript.fromLanguageCode(selectedSourceCode)
+            val script = OcrScript.fromLanguageCode(selectedSourceCode)
+            ocrRepo.recognizeFromImage(image, rotation, script)
         }
 
-        ocrRepo.recognizeFromImage(image, rotation, script)
+        ocrResult
             .onSuccess { mlText ->
                 val domain = mlText.toDomain(width, height, rotation)
                 val frameW = if (rotation == 90 || rotation == 270) height else width
@@ -208,13 +214,28 @@ class OcrTranslatorViewModel @Inject constructor(
     }
 
     /** Freeze current scan and trigger translation */
-    fun freezeAndCapture(bitmap: Bitmap? = null) {
+    fun freezeAndCapture(bitmap: Bitmap? = null, filteredBlocks: List<RecognizedBlock> = emptyList()) {
         val current = (_scanState.value as? OcrScanState.TextDetected)?.result ?: return
         val w = (_scanState.value as? OcrScanState.TextDetected)?.frameWidth ?: 1080
         val h = (_scanState.value as? OcrScanState.TextDetected)?.frameHeight ?: 1920
-        _frozenResult.value = current
+
+        val newResult = if (filteredBlocks.isNotEmpty()) {
+            val filteredParagraphs = current.paragraphs.filter { p ->
+                p.lines.any { pb -> filteredBlocks.any { fb -> fb.text == pb.text && fb.left == pb.left && fb.top == pb.top } }
+            }
+            val filteredFullText = filteredBlocks.joinToString("\n") { it.text }
+            current.copy(
+                fullText = filteredFullText,
+                blocks = filteredBlocks,
+                paragraphs = filteredParagraphs
+            )
+        } else {
+            current
+        }
+
+        _frozenResult.value = newResult
         _isLiveScan.value   = false
-        _scanState.value    = OcrScanState.TextDetected(current, w, h)
+        _scanState.value    = OcrScanState.TextDetected(newResult, w, h)
         _activeTab.value    = 0  // Show Text tab first
         
         ocrImageUri = bitmap?.let { saveTempBitmap(it) }
@@ -258,11 +279,18 @@ class OcrTranslatorViewModel @Inject constructor(
         ocrImageUri              = uri
 
         val (w, h) = ocrRepo.readDimensions(context, uri)
-        val script = OcrScript.fromLanguageCode(
-            _frozenResult.value?.detectedLanguage ?: "en"
-        )
+        val selectedSourceCode = _sourceLanguage.value.code
+        val ocrResult = if (selectedSourceCode == "auto") {
+            val bitmap = android.graphics.BitmapFactory.decodeStream(
+                context.contentResolver.openInputStream(uri)
+            ) ?: throw IllegalArgumentException("Could not decode image")
+            ocrRepo.recognizeAutoScriptFromBitmap(bitmap)
+        } else {
+            val script = OcrScript.fromLanguageCode(selectedSourceCode)
+            ocrRepo.recognizeFromUri(context, uri, script)
+        }
 
-        ocrRepo.recognizeFromUri(context, uri, script)
+        ocrResult
             .onSuccess { mlText ->
                 val domain = mlText.toDomain(w, h, 0)
                 if (domain.fullText.isBlank()) {
@@ -332,6 +360,7 @@ class OcrTranslatorViewModel @Inject constructor(
                         sourceLang      = res.detectedLang.displayName,
                         targetLang      = res.targetLang.displayName,
                         nativeMeaning   = res.nativeMeaning,
+                        meaningInTarget = res.meaningInTarget,
                         semanticMeaning = res.semanticMeaning
                     )
 
@@ -351,7 +380,24 @@ class OcrTranslatorViewModel @Inject constructor(
                         else append("OCR")
                         append(" → ${res.targetLang.displayName}")
                     }
-                    historyRepo.save("OCR", histTitle, res.translatedText.take(220))
+                    val ocrHistJson = com.smartvision.ai.domain.model.HistoryJsonSerializer.serializeOcr(
+                        com.smartvision.ai.domain.model.OcrHistoryDetail(
+                            extractedText = text,
+                            translatedText = res.translatedText,
+                            sourceLang = res.detectedLang.displayName,
+                            targetLang = res.targetLang.displayName,
+                            meaningInSource = res.nativeMeaning,
+                            meaningInTarget = res.meaningInTarget,
+                            meaningInEnglish = res.semanticMeaning?.meaningEnglish,
+                            context = res.semanticMeaning?.contextExplanation,
+                            usageExamples = res.semanticMeaning?.usageExplanation?.let { listOf(it) } ?: emptyList(),
+                            alternativeMeanings = emptyList(),
+                            pronunciation = res.semanticMeaning?.pronunciation,
+                            wordCount = text.split("\\s+".toRegex()).size,
+                            paragraphCount = result?.paragraphs?.size ?: 1
+                        )
+                    )
+                    historyRepo.save("OCR", histTitle, res.translatedText.take(220), ocrHistJson)
 
                     // Structured Firebase entry with rich OCR data
                     firebase.saveOCRHistory(
@@ -451,27 +497,48 @@ class OcrTranslatorViewModel @Inject constructor(
     fun toggleFlash() { _flashEnabled.update { !it } }
     fun togglePreprocessing() { _preprocessingEnabled.update { !it } }
 
-    /** Text-to-Speech */
+    /** Text-to-Speech with comprehensive locale mapping */
     fun speak(text: String, languageCode: String = "en") {
         val locale = when (languageCode) {
-            "hi" -> Locale("hi", "IN")
-            "te" -> Locale("te", "IN")
-            "ta" -> Locale("ta", "IN")
-            "mr" -> Locale("mr", "IN")
-            "fr" -> Locale.FRENCH
-            "de" -> Locale.GERMAN
-            "es" -> Locale("es", "ES")
-            "ja" -> Locale.JAPANESE
-            "zh" -> Locale.CHINESE
-            "ko" -> Locale.KOREAN
-            "ru" -> Locale("ru", "RU")
-            "ar" -> Locale("ar", "SA")
-            "it" -> Locale.ITALIAN
-            "pt" -> Locale("pt", "BR")
-            else -> Locale.ENGLISH
+            "hi"  -> Locale("hi", "IN")
+            "te"  -> Locale("te", "IN")
+            "ta"  -> Locale("ta", "IN")
+            "mr"  -> Locale("mr", "IN")
+            "kn"  -> Locale("kn", "IN")
+            "ml"  -> Locale("ml", "IN")
+            "gu"  -> Locale("gu", "IN")
+            "pa"  -> Locale("pa", "IN")
+            "bn"  -> Locale("bn", "BD")
+            "ur"  -> Locale("ur", "PK")
+            "fr"  -> Locale.FRENCH
+            "de"  -> Locale.GERMAN
+            "es"  -> Locale("es", "ES")
+            "it"  -> Locale.ITALIAN
+            "pt"  -> Locale("pt", "BR")
+            "ja"  -> Locale.JAPANESE
+            "zh"  -> Locale.CHINESE
+            "ko"  -> Locale.KOREAN
+            "ru"  -> Locale("ru", "RU")
+            "ar"  -> Locale("ar", "SA")
+            "nl"  -> Locale("nl", "NL")
+            "pl"  -> Locale("pl", "PL")
+            "sv"  -> Locale("sv", "SE")
+            "id"  -> Locale("id", "ID")
+            "th"  -> Locale("th", "TH")
+            "vi"  -> Locale("vi", "VN")
+            "tr"  -> Locale("tr", "TR")
+            "en"  -> Locale.ENGLISH
+            else  -> runCatching { Locale.forLanguageTag(languageCode) }.getOrDefault(Locale.ENGLISH)
         }
         tts?.language = locale
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
+    }
+
+    /** Speak the original extracted OCR text in the detected source language */
+    fun speakOriginalText() {
+        val result = _frozenResult.value ?: (_scanState.value as? OcrScanState.TextDetected)?.result ?: return
+        val text = _selectedParagraph.value?.text ?: _selectedBlock.value?.text ?: result.fullText
+        speak(text, result.detectedLanguage)
     }
 
     fun dismissError() { _scanState.value = OcrScanState.Idle }

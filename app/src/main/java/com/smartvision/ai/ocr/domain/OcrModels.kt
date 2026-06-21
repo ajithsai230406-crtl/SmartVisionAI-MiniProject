@@ -52,7 +52,8 @@ sealed class TranslationState {
         val translatedText: String,
         val sourceLang: String,              // Display name
         val targetLang: String,
-        val nativeMeaning: String? = null,
+        val nativeMeaning:   String? = null,
+        val meaningInTarget: String? = null, // meaning in the target language
         val semanticMeaning: com.smartvision.ai.translator.domain.SemanticMeaning? = null
     ) : TranslationState()
     data class Error(val message: String) : TranslationState()

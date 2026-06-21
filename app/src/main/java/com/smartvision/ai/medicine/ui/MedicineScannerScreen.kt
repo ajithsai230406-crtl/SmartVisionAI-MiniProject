@@ -40,6 +40,12 @@ import java.util.Locale
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
+import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
+import android.os.Build
+import android.provider.MediaStore
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 
 // ── Module accent colors ───────────────────────────────────────────────────────
 private val MedCyan   = Color(0xFF00E5FF)
@@ -61,6 +67,29 @@ fun MedicineScannerScreen(
     val history     by viewModel.history.collectAsStateWithLifecycle()
     val suggestions by viewModel.suggestions.collectAsStateWithLifecycle()
     val keyboard    = LocalSoftwareKeyboardController.current
+    val context     = LocalContext.current
+
+    // Gallery image picker
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        uri?.let {
+            try {
+                val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    val source = ImageDecoder.createSource(context.contentResolver, it)
+                    ImageDecoder.decodeBitmap(source).copy(android.graphics.Bitmap.Config.ARGB_8888, true)
+                } else {
+                    @Suppress("DEPRECATION")
+                    MediaStore.Images.Media.getBitmap(context.contentResolver, it)
+                }
+                if (bitmap != null) {
+                    viewModel.analyzeFromBitmap(bitmap)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -132,6 +161,9 @@ fun MedicineScannerScreen(
                         onQuery     = { viewModel.onQueryChange(it) },
                         onAnalyze   = { viewModel.analyzeByName(); keyboard?.hide() },
                         onCamera    = { viewModel.openCamera() },
+                        onGallery   = { galleryLauncher.launch(
+                            androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        ) },
                         onDemo      = { viewModel.quickDemoScan() },
                         onSuggestion = { viewModel.analyzeByName(it) },
                         onHistory   = { viewModel.openHistory() },
@@ -155,6 +187,11 @@ fun MedicineScannerScreen(
                         onTab      = { viewModel.selectTab(it) },
                         onVoice    = { viewModel.toggleVoice(currentState.info) },
                         onFavorite = { viewModel.toggleCurrentFavorite() }
+                    )
+                    is MedicineScanState.NotMedicine -> MedNotMedicineScreen(
+                        message = currentState.message,
+                        onRetry = { viewModel.reset() },
+                        onCamera = { viewModel.openCamera() }
                     )
                     is MedicineScanState.Error -> MedErrorScreen(
                         message = currentState.message,
@@ -235,6 +272,7 @@ private fun MedTopBar(
 private fun MedIdleScreen(
     query: String, suggestions: List<String>, history: List<MedicineScanRecord>,
     onQuery: (String) -> Unit, onAnalyze: () -> Unit, onCamera: () -> Unit,
+    onGallery: () -> Unit,
     onDemo: () -> Unit, onSuggestion: (String) -> Unit, onHistory: () -> Unit,
     onCategoryClick: (MedicineType) -> Unit
 ) {
@@ -245,7 +283,7 @@ private fun MedIdleScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         // Hero scan area
-        item { MedScanHero(onCamera = onCamera, onDemo = onDemo) }
+        item { MedScanHero(onCamera = onCamera, onGallery = onGallery, onDemo = onDemo) }
 
         // Search field
         item {
@@ -376,7 +414,7 @@ private fun MedIdleScreen(
 //  HERO SCAN AREA — animated camera scan with neon brackets
 // ══════════════════════════════════════════════════════════════════════════════
 @Composable
-private fun MedScanHero(onCamera: () -> Unit, onDemo: () -> Unit) {
+private fun MedScanHero(onCamera: () -> Unit, onGallery: () -> Unit, onDemo: () -> Unit) {
     val inf   = rememberInfiniteTransition(label = "medHero")
     val scanY by inf.animateFloat(0.05f, 0.95f, infiniteRepeatable(tween(1800, easing = LinearEasing), RepeatMode.Reverse), label = "scan")
     val glow  by inf.animateFloat(0.3f, 0.85f, infiniteRepeatable(tween(2200), RepeatMode.Reverse), label = "glow")
@@ -435,6 +473,17 @@ private fun MedScanHero(onCamera: () -> Unit, onDemo: () -> Unit) {
                 color = MedCyan, fontWeight = FontWeight.SemiBold)
             Text("or type medicine name below", style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.7f))
+        }
+
+        // Gallery button (bottom-left)
+        Box(Modifier.align(Alignment.BottomStart).padding(12.dp)
+            .clip(RoundedCornerShape(8.dp)).background(MedGreen.copy(0.2f))
+            .border(1.dp, MedGreen.copy(0.4f), RoundedCornerShape(8.dp))
+            .clickable(onClick = onGallery).padding(horizontal = 10.dp, vertical = 6.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("🖼️", fontSize = 14.sp)
+                Text("Gallery", style = MaterialTheme.typography.labelSmall, color = MedGreen, fontWeight = FontWeight.SemiBold)
+            }
         }
 
         // Demo button (bottom-right)
@@ -607,13 +656,14 @@ private fun MedResultScreen(
                 slideInHorizontally { if (targetState > initialState) it else -it } togetherWith
                 slideOutHorizontally { if (targetState > initialState) -it else it }
             }, label = "medTab") { tab ->
-                when (tab) {
+            when (tab) {
                     0 -> MedInfoTab(info)
                     1 -> MedSideEffectsTab(info)
                     2 -> MedInteractionsTab(info)
                     3 -> MedWarningsTab(info)
                     4 -> MedStorageTab(info)
                     5 -> MedAiSummaryTab(info)
+                    6 -> MedAlternativesTab(info)
                     else -> Unit
                 }
             }
@@ -677,6 +727,10 @@ private fun MedHeaderCard(info: MedicineInfo, isFavorite: Boolean, isSpeaking: B
                     if (info.brandName != info.name && info.brandName.isNotBlank()) {
                         Text("Also sold as: ${info.brandName}", style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (info.manufacturer.isNotBlank()) {
+                        Text("🏭 ${info.manufacturer}", style = MaterialTheme.typography.labelSmall,
+                            color = MedCyan.copy(0.9f), fontWeight = FontWeight.Medium)
                     }
                 }
                 Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -781,7 +835,8 @@ private fun MedDosageCard(info: MedicineInfo) {
 private fun MedTabRow(selectedTab: Int, onTab: (Int) -> Unit) {
     val tabs = listOf("📋 Uses" to MedBlue, "⚠️ Side Effects" to MedOrange,
         "🔄 Interactions" to MedPurple, "⚡ Warnings" to MedRed,
-        "🌡️ Storage" to MedCyan, "🤖 AI Summary" to MedGreen)
+        "🌡️ Storage" to MedCyan, "🤖 AI Summary" to MedGreen,
+        "💊 Alternatives" to Color(0xFF7C4DFF))
 
     ScrollableTabRow(
         selectedTabIndex = selectedTab, edgePadding = 0.dp,
@@ -1499,6 +1554,263 @@ private fun MedDirectoryDialog(
                         }
                         Text("→", color = MedCyan, fontSize = 16.sp)
                     }
+                }
+            }
+        }
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  NOT MEDICINE SCREEN — rejection for non-medicine objects
+// ══════════════════════════════════════════════════════════════════════════════
+@Composable
+private fun MedNotMedicineScreen(message: String, onRetry: () -> Unit, onCamera: () -> Unit) {
+    val inf = rememberInfiniteTransition(label = "notMed")
+    val pulse by inf.animateFloat(0.92f, 1.08f, infiniteRepeatable(tween(1400), RepeatMode.Reverse), label = "pulse")
+    
+    Box(Modifier.fillMaxSize(), Alignment.Center) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier.padding(32.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(100.dp)
+                    .scale(pulse)
+                    .clip(CircleShape)
+                    .background(
+                        Brush.radialGradient(
+                            listOf(MedOrange.copy(0.2f), Color.Transparent)
+                        )
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("🚫", fontSize = 56.sp)
+            }
+            
+            Text(
+                "Not a Medicine",
+                style = MaterialTheme.typography.titleLarge,
+                color = MedOrange,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
+            
+            Text(
+                message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                lineHeight = 22.sp
+            )
+            
+            Spacer(Modifier.height(8.dp))
+            
+            // Tips section
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.extended.glassCard)
+                    .border(1.dp, MaterialTheme.extended.glassBorder, RoundedCornerShape(16.dp))
+                    .padding(16.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("💡 Tips for better scanning:", style = MaterialTheme.typography.labelMedium,
+                        color = MedCyan, fontWeight = FontWeight.SemiBold)
+                    listOf(
+                        "📦 Point camera at the medicine packaging label",
+                        "📝 Make sure text on the label is clearly visible",
+                        "💊 Scan the side with composition & dosage info",
+                        "💡 Use good lighting for better OCR accuracy"
+                    ).forEach { tip ->
+                        Text(tip, style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+            
+            Spacer(Modifier.height(8.dp))
+            
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                // Retry button
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(MedBlue.copy(0.15f))
+                        .border(1.dp, MedBlue.copy(0.4f), RoundedCornerShape(14.dp))
+                        .clickable(onClick = onRetry)
+                        .padding(horizontal = 28.dp, vertical = 14.dp)
+                ) {
+                    Text("🔍 Search", style = MaterialTheme.typography.titleSmall, color = MedBlue, fontWeight = FontWeight.Bold)
+                }
+                
+                // Camera button
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(MedCyan.copy(0.15f))
+                        .border(1.dp, MedCyan.copy(0.4f), RoundedCornerShape(14.dp))
+                        .clickable(onClick = onCamera)
+                        .padding(horizontal = 28.dp, vertical = 14.dp)
+                ) {
+                    Text("📷 Rescan", style = MaterialTheme.typography.titleSmall, color = MedCyan, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  ALTERNATIVES TAB — manufacturer + similar medicines
+// ══════════════════════════════════════════════════════════════════════════════
+@Composable
+private fun MedAlternativesTab(info: MedicineInfo) {
+    val ext = MaterialTheme.extended
+    val altColor = Color(0xFF7C4DFF)
+    
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // Manufacturer card
+        if (info.manufacturer.isNotBlank()) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(ext.glassCard)
+                    .border(1.dp, ext.glassBorder, RoundedCornerShape(16.dp))
+                    .padding(16.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("🏭", fontSize = 20.sp)
+                        Text(
+                            "Manufacturer",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MedCyan,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Text(
+                        info.manufacturer,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+        
+        // Alternatives header
+        if (info.alternatives.isNotEmpty()) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(altColor.copy(0.08f))
+                    .border(1.dp, altColor.copy(0.3f), RoundedCornerShape(16.dp))
+                    .padding(16.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("💊", fontSize = 20.sp)
+                        Text(
+                            "Similar Alternatives",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = altColor,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Box(
+                            Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(altColor.copy(0.2f))
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                "${info.alternatives.size} found",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = altColor,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                    
+                    Text(
+                        "These medicines serve a similar therapeutic purpose. Always consult your doctor before switching.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = 18.sp
+                    )
+                    
+                    info.alternatives.forEachIndexed { index, alt ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(ext.glassCard)
+                                .border(1.dp, ext.glassBorder, RoundedCornerShape(12.dp))
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(altColor.copy(0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("${index + 1}", style = MaterialTheme.typography.labelMedium,
+                                    color = altColor, fontWeight = FontWeight.Bold)
+                            }
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    alt,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                            Text("💊", fontSize = 16.sp)
+                        }
+                    }
+                }
+            }
+        } else {
+            // No alternatives found
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(ext.glassCard)
+                    .border(1.dp, ext.glassBorder, RoundedCornerShape(16.dp))
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("💊", fontSize = 32.sp)
+                    Text(
+                        "No alternatives available",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        "Consult your doctor for alternative medication options.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.7f),
+                        textAlign = TextAlign.Center
+                    )
                 }
             }
         }

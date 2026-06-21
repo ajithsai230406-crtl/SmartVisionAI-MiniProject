@@ -87,16 +87,81 @@ class ObjectDetectionRepository @Inject constructor(
 
     private fun cleanLabel(label: String): String {
         return when (label.lowercase().trim()) {
-            "cell phone" -> "Phone"
-            "tv" -> "Monitor"
-            "person" -> "Person"
-            "laptop" -> "Laptop"
-            "keyboard" -> "Keyboard"
-            "mouse" -> "Mouse"
-            "bottle" -> "Bottle"
-            "chair" -> "Chair"
-            "book" -> "Book"
-            else -> label.replaceFirstChar { it.uppercase() }
+            "cell phone"     -> "Phone"
+            "tv"             -> "Monitor"
+            "person"         -> "Person"
+            "laptop"         -> "Laptop"
+            "keyboard"       -> "Keyboard"
+            "mouse"          -> "Mouse"
+            "bottle"         -> "Bottle"
+            "chair"          -> "Chair"
+            "book"           -> "Book"
+            "eye glasses"    -> "Eyeglasses"
+            "dining table"   -> "Table"
+            "potted plant"   -> "Plant"
+            "hair drier"     -> "Hair Dryer"
+            "sports ball"    -> "Ball"
+            "teddy bear"     -> "Teddy Bear"
+            "fire hydrant"   -> "Fire Hydrant"
+            "street sign"    -> "Street Sign"
+            "stop sign"      -> "Stop Sign"
+            "parking meter"  -> "Parking Meter"
+            "traffic light"  -> "Traffic Light"
+            "baseball bat"   -> "Baseball Bat"
+            "baseball glove" -> "Baseball Glove"
+            "wine glass"     -> "Wine Glass"
+            "hot dog"        -> "Hot Dog"
+            "tennis racket"  -> "Tennis Racket"
+            "backpack"       -> "Backpack"
+            "handbag"        -> "Handbag"
+            "suitcase"       -> "Suitcase"
+            "scissors"       -> "Scissors"
+            "toothbrush"     -> "Toothbrush"
+            "remote"         -> "Remote Control"
+            "clock"          -> "Clock"
+            "vase"           -> "Vase"
+            "umbrella"       -> "Umbrella"
+            "frisbee"        -> "Frisbee"
+            "skis"           -> "Ski Board"
+            "snowboard"      -> "Snowboard"
+            "surfboard"      -> "Surfboard"
+            "kite"           -> "Kite"
+            "skateboard"     -> "Skateboard"
+            else -> label.split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }
+        }
+    }
+
+    /**
+     * Sports/outdoor labels that EfficientDet-Lite commonly confuses with cylindrical
+     * or reflective objects (bottles, flasks, phones, pens, etc.).
+     * If such a label wins on a detection that is large/centered in frame, we suppress it.
+     */
+    private val likelyMislabeledSports = setOf(
+        "tennis racket", "baseball bat", "frisbee", "surfboard",
+        "skateboard", "snowboard", "skis", "kite", "sports ball",
+        "baseball glove", "golf club"
+    )
+
+    /**
+     * Applies a post-processing sanity check on a raw TFLite label:
+     * If the detected label is a sports/outdoor item that is unlikely to appear
+     * filling most of the camera frame in everyday use, and the bounding box covers
+     * a large portion of the image (>30% area), override the label to "bottle"
+     * (the most common large-frame false-positive in the COCO model).
+     */
+    private fun sanitizeLabel(
+        rawLabel: String,
+        boxArea: Float   // normalized area: (right-left)*(bottom-top), 0.0–1.0
+    ): String {
+        val lower = rawLabel.lowercase().trim()
+        return if (lower in likelyMislabeledSports && boxArea > 0.30f) {
+            android.util.Log.d(
+                "ObjectDetector",
+                "Sanity override: '$rawLabel' (area=$boxArea) is likely a bottle/object — overriding label to 'bottle'"
+            )
+            "bottle"
+        } else {
+            rawLabel
         }
     }
 
@@ -151,26 +216,31 @@ class ObjectDetectionRepository @Inject constructor(
                 for (i in 0 until actualCount) {
                     val confidence = outputScores[0][i]
 
-                    // Filter out low-confidence detections
-                    if (confidence < 0.35f) continue
+                    // Raise threshold to 0.60 for reliable results; low-confidence detections
+                    // from EfficientDet-Lite4 tend to produce wrong labels (e.g. bottle → tennis racket)
+                    if (confidence < 0.60f) continue
 
                     val classId = outputClasses[0][i].toInt()
                     val rawLabel = labels.getOrElse(classId) { "Object" }
-                    
-                    val label = if (confidence < 0.60f) "Unknown Object" else cleanLabel(rawLabel)
+
+                    // Compute normalized bounding-box area for the sanity check
+                    val ymin = outputBoxes[0][i][0].coerceIn(0f, 1f)
+                    val xmin = outputBoxes[0][i][1].coerceIn(0f, 1f)
+                    val ymax = outputBoxes[0][i][2].coerceIn(0f, 1f)
+                    val xmax = outputBoxes[0][i][3].coerceIn(0f, 1f)
+                    val boxArea = (xmax - xmin) * (ymax - ymin)
+
+                    // Apply sanity override (e.g. large "tennis racket" → "bottle")
+                    val sanitizedRaw = sanitizeLabel(rawLabel, boxArea)
+                    val label = cleanLabel(sanitizedRaw)
                     val category = label.toCategory()
 
                     // EfficientDet box coordinates: [ymin, xmin, ymax, xmax] normalized 0–1
-                    val ymin = outputBoxes[0][i][0]
-                    val xmin = outputBoxes[0][i][1]
-                    val ymax = outputBoxes[0][i][2]
-                    val xmax = outputBoxes[0][i][3]
-
                     val box = DetectionBox(
-                        left   = xmin.coerceIn(0f, 1f),
-                        top    = ymin.coerceIn(0f, 1f),
-                        right  = xmax.coerceIn(0f, 1f),
-                        bottom = ymax.coerceIn(0f, 1f)
+                        left   = xmin,
+                        top    = ymin,
+                        right  = xmax,
+                        bottom = ymax
                     )
 
                     android.util.Log.d(
@@ -192,10 +262,11 @@ class ObjectDetectionRepository @Inject constructor(
 
                 android.util.Log.d(
                     "ObjectDetector",
-                    "Detected $actualCount raw, ${detectedItems.size} above threshold"
+                    "Detected $actualCount raw, ${detectedItems.size} above 50% threshold"
                 )
 
-                detectedItems
+                // Sort by confidence descending — highest confidence object first
+                detectedItems.sortedByDescending { it.confidence }
             }
         }
 

@@ -61,7 +61,7 @@ interface ScanHistoryDao {
 
 @Database(
     entities  = [ScanHistoryEntity::class, HistoryEntity::class, GeminiCacheEntity::class, OcrScanEntity::class, StudentHelperHistoryEntity::class],
-    version   = 5,
+    version   = 6,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -93,6 +93,15 @@ abstract class AppDatabase : RoomDatabase() {
                         `script` TEXT NOT NULL DEFAULT 'Latin'
                     )
                     """.trimIndent()
+                )
+            }
+        }
+
+        /** Migration from v5 → v6: add detailsJson column to history_records */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "ALTER TABLE history_records ADD COLUMN detailsJson TEXT NOT NULL DEFAULT ''"
                 )
             }
         }

@@ -100,22 +100,57 @@ class StudentHelperViewModel @Inject constructor(
         }
     }
 
+    // ── Image enhancement for better OCR ────────────────────────────────────
+    private fun enhanceBitmapForOcr(bitmap: Bitmap): Bitmap {
+        // 1. Upscale small images for better OCR accuracy
+        val minDimension = 1024
+        var enhanced = if (bitmap.width < minDimension && bitmap.height < minDimension) {
+            val scale = minDimension.toFloat() / maxOf(bitmap.width, bitmap.height)
+            Bitmap.createScaledBitmap(bitmap, (bitmap.width * scale).toInt(), (bitmap.height * scale).toInt(), true)
+        } else bitmap
+
+        // 2. Apply contrast enhancement using ColorMatrix
+        try {
+            val result = Bitmap.createBitmap(enhanced.width, enhanced.height, Bitmap.Config.ARGB_8888)
+            val canvas = android.graphics.Canvas(result)
+            val paint = android.graphics.Paint()
+
+            // Boost contrast by 1.3x and slight brightness increase
+            val contrast = 1.3f
+            val brightness = 10f
+            val cm = android.graphics.ColorMatrix(floatArrayOf(
+                contrast, 0f, 0f, 0f, brightness,
+                0f, contrast, 0f, 0f, brightness,
+                0f, 0f, contrast, 0f, brightness,
+                0f, 0f, 0f, 1f, 0f
+            ))
+            paint.colorFilter = android.graphics.ColorMatrixColorFilter(cm)
+            canvas.drawBitmap(enhanced, 0f, 0f, paint)
+            enhanced = result
+        } catch (_: Exception) {
+            // Fall back to unenhanced bitmap
+        }
+
+        return enhanced
+    }
+
     // ── OCR processing for camera captures ───────────────────────────────────
     fun processImageForOcr(bitmap: Bitmap) {
         _uiState.value = StudentUiState.Loading
         viewModelScope.launch {
-            ocrRepo.recognizeFromBitmap(bitmap)
+            val enhanced = enhanceBitmapForOcr(bitmap)
+            aiRepo.transcribeImage(enhanced)
                 .onSuccess { recognizedText ->
-                    val cleanText = recognizedText.text.trim()
+                    val cleanText = recognizedText.trim()
                     if (cleanText.isBlank()) {
-                        _uiState.value = StudentUiState.Error("OCR Failed: No readable text detected in captured image.")
+                        fallbackToLocalOcr(enhanced, "OCR Failed: No readable text detected in captured image.")
                     } else {
                         _questionText.value = cleanText
                         generateAnswer(cleanText)
                     }
                 }
                 .onFailure {
-                    _uiState.value = StudentUiState.Error("OCR Failed: Could not process captured image.")
+                    fallbackToLocalOcr(enhanced, "OCR Failed: Could not process captured image.")
                 }
         }
     }
@@ -124,18 +159,42 @@ class StudentHelperViewModel @Inject constructor(
     fun processUriForOcr(uri: Uri) {
         _uiState.value = StudentUiState.Loading
         viewModelScope.launch {
-            ocrRepo.recognizeFromUri(context, uri)
+            val bitmap = imageUtils.loadBitmapFromUri(context, uri)
+            if (bitmap == null) {
+                _uiState.value = StudentUiState.Error("OCR Failed: Could not load selected image.")
+                return@launch
+            }
+            val enhanced = enhanceBitmapForOcr(bitmap)
+            aiRepo.transcribeImage(enhanced)
                 .onSuccess { recognizedText ->
-                    val cleanText = recognizedText.text.trim()
+                    val cleanText = recognizedText.trim()
                     if (cleanText.isBlank()) {
-                        _uiState.value = StudentUiState.Error("OCR Failed: No readable text detected in selected image.")
+                        fallbackToLocalOcr(enhanced, "OCR Failed: No readable text detected in selected image.")
                     } else {
                         _questionText.value = cleanText
                         generateAnswer(cleanText)
                     }
                 }
                 .onFailure {
-                    _uiState.value = StudentUiState.Error("OCR Failed: Could not process gallery image.")
+                    fallbackToLocalOcr(enhanced, "OCR Failed: Could not process gallery image.")
+                }
+        }
+    }
+
+    private fun fallbackToLocalOcr(bitmap: Bitmap, originalError: String) {
+        viewModelScope.launch {
+            ocrRepo.recognizeAutoScriptFromBitmap(bitmap)
+                .onSuccess { mlText ->
+                    val cleanText = mlText.text.trim()
+                    if (cleanText.isBlank()) {
+                        _uiState.value = StudentUiState.Error(originalError)
+                    } else {
+                        _questionText.value = cleanText
+                        generateAnswer(cleanText)
+                    }
+                }
+                .onFailure {
+                    _uiState.value = StudentUiState.Error(originalError)
                 }
         }
     }

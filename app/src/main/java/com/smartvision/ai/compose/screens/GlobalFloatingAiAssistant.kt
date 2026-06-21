@@ -46,13 +46,15 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
 import com.smartvision.ai.compose.components.GradientBackground
-import com.smartvision.ai.presentation.chat.AiChatViewModel
+import com.smartvision.ai.presentation.chat.FloatingContextViewModel
 import com.smartvision.ai.ui.theme.*
 import java.util.Locale
 import kotlin.math.roundToInt
 
 // ──────────────────────────────────────────────────────────────────────────────
 // PREMIUM CONTEXT-AWARE GLOBAL FLOATING AI ASSISTANT OVERLAY
+// Uses FloatingContextViewModel — completely independent from main AI chat.
+// Reads live screen context from ScreenContextManager for contextual answers.
 // ──────────────────────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalPermissionsApi::class)
@@ -60,7 +62,7 @@ import kotlin.math.roundToInt
 fun GlobalFloatingAiAssistant(
     navController: NavController,
     modifier: Modifier = Modifier,
-    viewModel: AiChatViewModel = hiltViewModel()
+    viewModel: FloatingContextViewModel = hiltViewModel()
 ) {
     val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
     
@@ -73,8 +75,7 @@ fun GlobalFloatingAiAssistant(
     val micPermission = rememberPermissionState(Manifest.permission.RECORD_AUDIO)
 
     val messages by viewModel.messages.collectAsStateWithLifecycle()
-    val isLastPage by viewModel.isLastPage.collectAsStateWithLifecycle()
-    val isLoadingHistory by viewModel.isLoadingHistory.collectAsStateWithLifecycle()
+    val hasContextData by viewModel.hasContextData.collectAsStateWithLifecycle()
     var isExpanded by remember { mutableStateOf(false) }
     var input by remember { mutableStateOf("") }
     val chatListState = rememberLazyListState()
@@ -93,9 +94,14 @@ fun GlobalFloatingAiAssistant(
     }
 
     LaunchedEffect(isExpanded) {
-        if (!isExpanded && isListening) {
-            speechRecognizer?.stopListening()
-            isListening = false
+        if (isExpanded) {
+            // Summarize the current screen when panel opens
+            viewModel.summarizeCurrentScreen()
+        } else {
+            if (isListening) {
+                speechRecognizer?.stopListening()
+                isListening = false
+            }
         }
     }
 
@@ -117,38 +123,14 @@ fun GlobalFloatingAiAssistant(
             "qr_scanner_v2" -> "QR Code Scanner"
             "document_scanner" -> "Document PDF Scanner"
             "medicine_scanner" -> "Premium Medicine Scanner"
+            "object_detector_v2" -> "Object Detector"
             else -> "Smart Vision AI"
         }
     }
 
-    val dynamicSuggestions = remember(currentRoute) {
-        when (currentRoute) {
-            "ocr_translator" -> listOf(
-                "💡 How do I select and translate targeted text?",
-                "📸 Can I translate text inside a custom crop box?",
-                "❓ Where is the original detected language explanation?"
-            )
-            "student_helper_v2" -> listOf(
-                "🎓 Explain math equations step-by-step",
-                "📚 How do I chat with the AI Math Tutor?",
-                "📝 Provide a mathematical practice question"
-            )
-            "waste_classifier_v2" -> listOf(
-                "♻️ Show plastic recycling guidelines",
-                "🍃 Is organic food waste compostable?",
-                "🧴 How are clean glass containers classified?"
-            )
-            "voice_translator_v2" -> listOf(
-                "🎙️ Does voice translator auto-play translations?",
-                "🗣️ How do I swap recording channels?",
-                "🌐 Is voice processing context-aware?"
-            )
-            else -> listOf(
-                "🤖 What tasks can Smart Vision AI do?",
-                "📁 Explain the 9-module features",
-                "🔋 Is document scanning offline-capable?"
-            )
-        }
+    // Dynamic suggestions from FloatingContextViewModel based on actual screen context
+    val dynamicSuggestions = remember(currentRoute, hasContextData) {
+        viewModel.getDynamicSuggestions()
     }
 
     Box(modifier = modifier.fillMaxSize()) {
@@ -356,7 +338,7 @@ fun GlobalFloatingAiAssistant(
 
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            "SmartVision AI Chatbot",
+                            "Screen Assistant",
                             style = MaterialTheme.typography.titleMedium,
                             color = Color.White,
                             fontWeight = FontWeight.Bold
@@ -365,13 +347,22 @@ fun GlobalFloatingAiAssistant(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                "Gemini 1.5 Pro",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = NeonBlue,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text("•", color = Color.White.copy(0.4f), fontSize = 10.sp)
+                            // Context indicator
+                            if (hasContextData) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFF00FF88))
+                                )
+                                Text(
+                                    "Context Active",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFF00FF88),
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text("•", color = Color.White.copy(0.4f), fontSize = 10.sp)
+                            }
                             Text(
                                 routeName,
                                 style = MaterialTheme.typography.labelSmall,
@@ -382,14 +373,15 @@ fun GlobalFloatingAiAssistant(
                         }
                     }
 
-                    // Clear Chat and Close drawer icons
-                    IconButton(onClick = { viewModel.clearChat() }) {
+                    // Clear Chat icon
+                    IconButton(onClick = { viewModel.clearContextChat() }) {
                         Icon(
                             imageVector = Icons.Rounded.DeleteOutline,
-                            contentDescription = "Clear conversation history",
+                            contentDescription = "Clear conversation",
                             tint = Color.White.copy(0.6f)
                         )
                     }
+                    // Close drawer
                     IconButton(
                         onClick = { isExpanded = false },
                         modifier = Modifier
@@ -409,7 +401,7 @@ fun GlobalFloatingAiAssistant(
                     modifier = Modifier
                         .weight(1f)
                         .padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.Bottom),
                     contentPadding = PaddingValues(vertical = 14.dp)
                 ) {
                     if (messages.size <= 1) {
@@ -420,16 +412,35 @@ fun GlobalFloatingAiAssistant(
                                     .padding(vertical = 12.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Text(
-                                    "Futuristic context-aware assistant. Ask me questions, solve math formulas, identify objects, or clear up doubts regarding the current screen details!",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color.White.copy(alpha = 0.55f),
-                                    textAlign = TextAlign.Center,
-                                    lineHeight = 18.sp
-                                )
+                                if (hasContextData) {
+                                    // Show context indicator
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(Brush.horizontalGradient(listOf(NeonCyan.copy(0.08f), NeonPurple.copy(0.08f))))
+                                            .border(1.dp, NeonCyan.copy(0.3f), RoundedCornerShape(12.dp))
+                                            .padding(12.dp)
+                                    ) {
+                                        Text(
+                                            "🔍 Screen context detected! I can answer questions about what's currently on your screen.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = NeonCyan,
+                                            lineHeight = 18.sp
+                                        )
+                                    }
+                                } else {
+                                    Text(
+                                        "Context-aware assistant. Navigate to any module to get screen-aware answers!",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color.White.copy(alpha = 0.55f),
+                                        textAlign = TextAlign.Center,
+                                        lineHeight = 18.sp
+                                    )
+                                }
                                 Spacer(Modifier.height(18.dp))
                                 Text(
-                                    "⚡ Dynamic Suggestions",
+                                    "⚡ Contextual Suggestions",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = NeonPurple,
                                     fontWeight = FontWeight.Bold
@@ -441,37 +452,11 @@ fun GlobalFloatingAiAssistant(
                             SuggestionChipItem(
                                 text = chip,
                                 onClick = {
-                                    viewModel.send(chip, contextRoute = currentRoute)
+                                    viewModel.sendContextualMessage(chip, currentRoute = currentRoute)
                                 }
                             )
                         }
                     } else {
-                        if (!isLastPage) {
-                            item {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 8.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    if (isLoadingHistory) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(24.dp),
-                                            color = NeonPurple,
-                                            strokeWidth = 2.dp
-                                        )
-                                    } else {
-                                        TextButton(
-                                            onClick = { viewModel.loadNextPage() },
-                                            colors = ButtonDefaults.textButtonColors(contentColor = NeonCyan)
-                                        ) {
-                                            Text("Load Earlier Messages", style = MaterialTheme.typography.labelLarge)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
                         items(messages) { msg ->
                             AssistantChatBubble(
                                 text = msg.text,
@@ -543,7 +528,7 @@ fun GlobalFloatingAiAssistant(
                     onChange = { input = it },
                     onSend = {
                         if (input.isNotBlank() && !(viewModel.isLoading || viewModel.isStreaming)) {
-                            viewModel.send(input.trim(), contextRoute = currentRoute)
+                            viewModel.sendContextualMessage(input.trim(), currentRoute = currentRoute)
                             input = ""
                         }
                     }
@@ -822,7 +807,7 @@ private fun InputVoiceRowItem(
                 decorationBox = { inner ->
                     if (input.isEmpty()) {
                         Text(
-                            text = if (isListening) "Listening spoken voice..." else "Ask chatbot contextually...",
+                            text = if (isListening) "Listening spoken voice..." else "Ask about this screen...",
                             color = Color.White.copy(0.40f),
                             style = MaterialTheme.typography.bodyMedium
                         )

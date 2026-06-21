@@ -3,6 +3,8 @@ package com.smartvision.ai.translator.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -46,23 +48,53 @@ fun SmartTextTranslatorScreen(
     val showLangPicker by viewModel.showLangPicker.collectAsStateWithLifecycle()
     val isAutoDetect   by viewModel.isAutoDetect.collectAsStateWithLifecycle()
     val recent         by viewModel.recentTranslations.collectAsStateWithLifecycle()
+    val ocrState       by viewModel.ocrInputState.collectAsStateWithLifecycle()
     val keyboard       = LocalSoftwareKeyboardController.current
     val ctx            = LocalContext.current
 
-    DisposableEffect(Unit) {
-        onDispose {
-            viewModel.stopSpeaking()
+    // Gallery launcher
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let { viewModel.analyzeImageUri(it) }
+    }
+
+    // Camera launcher (use a temp file approach with TakePicture)
+    val cameraUri = remember { mutableStateOf<android.net.Uri?>(null) }
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        if (success) {
+            cameraUri.value?.let { uri ->
+                val bmp = android.graphics.BitmapFactory.decodeStream(
+                    ctx.contentResolver.openInputStream(uri)
+                )
+                bmp?.let { viewModel.analyzeImageBitmap(it) }
+            }
         }
+    }
+
+    fun launchCamera() {
+        val file = java.io.File(ctx.cacheDir, "smart_translator_ocr_${System.currentTimeMillis()}.jpg")
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            ctx, "${ctx.packageName}.fileprovider", file
+        )
+        cameraUri.value = uri
+        cameraLauncher.launch(uri)
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { viewModel.stopSpeaking() }
     }
 
     GradientBackground {
         Box(modifier = Modifier.fillMaxSize()) {
             Column(modifier = Modifier.fillMaxSize()) {
 
-                // ── Top bar ───────────────────────────────────────────────────
+                // ── Top bar ─────────────────────────────────────────────────
                 TranslatorTopBar(onBack = onBack)
 
-                // ── Language selector row ──────────────────────────────────────
+                // ── Language selector row ──────────────────────────────────
                 LanguageSelectorRow(
                     sourceLang     = sourceLang,
                     targetLang     = targetLang,
@@ -82,7 +114,27 @@ fun SmartTextTranslatorScreen(
                 ) {
                     Spacer(Modifier.height(4.dp))
 
-                    // ── Input card ──────────────────────────────────────────────
+                    // ── Image source row (Camera | Gallery) ────────────────
+                    ImageSourceRow(
+                        onCamera  = { launchCamera() },
+                        onGallery = { galleryLauncher.launch("image/*") }
+                    )
+
+                    // ── OCR processing feedback ────────────────────────────
+                    AnimatedVisibility(visible = ocrState is OcrInputState.Processing) {
+                        OcrProcessingBanner()
+                    }
+                    AnimatedVisibility(visible = ocrState is OcrInputState.Error) {
+                        val errMsg = (ocrState as? OcrInputState.Error)?.message ?: ""
+                        ErrorBanner("📷 $errMsg")
+                    }
+                    AnimatedVisibility(visible = ocrState is OcrInputState.Success) {
+                        OcrSuccessBanner {
+                            viewModel.dismissOcrState()
+                        }
+                    }
+
+                    // ── Input card ──────────────────────────────────────────
                     TranslatorInputCard(
                         text        = inputText,
                         sourceLang  = sourceLang,
@@ -93,7 +145,7 @@ fun SmartTextTranslatorScreen(
                         onSpeak     = { viewModel.speakOriginal() }
                     )
 
-                    // ── Loading ────────────────────────────────────────────────
+                    // ── Loading ────────────────────────────────────────────
                     AnimatedVisibility(
                         visible = state is TranslatorState.Translating || state is TranslatorState.Downloading
                     ) {
@@ -103,7 +155,7 @@ fun SmartTextTranslatorScreen(
                         )
                     }
 
-                    // ── Translation result card ────────────────────────────────
+                    // ── Translation result card ────────────────────────────
                     AnimatedVisibility(
                         visible = state is TranslatorState.Success,
                         enter   = fadeIn() + expandVertically()
@@ -111,14 +163,15 @@ fun SmartTextTranslatorScreen(
                         (state as? TranslatorState.Success)?.let { s ->
                             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                 TranslationResultCard(
-                                    result     = s.result,
-                                    onSpeak    = { viewModel.speakTranslation() },
-                                    onCopy     = {
+                                    result       = s.result,
+                                    onSpeakSrc   = { viewModel.speakOriginal() },
+                                    onSpeak      = { viewModel.speakTranslation() },
+                                    onCopy       = {
                                         val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                         cm.setPrimaryClip(ClipData.newPlainText("Translation", s.result.translatedText))
                                     },
-                                    onShare    = { shareText(ctx, s.result.translatedText) },
-                                    onSave     = {
+                                    onShare      = { shareText(ctx, s.result.translatedText) },
+                                    onSave       = {
                                         val filename = "SmartVisionAI_Translation_${System.currentTimeMillis() / 1000}.txt"
                                         com.smartvision.ai.utils.FileExportHelper.saveTextFile(ctx, filename, s.result.translatedText)
                                             .onSuccess {
@@ -132,22 +185,23 @@ fun SmartTextTranslatorScreen(
 
                                 s.result.semanticMeaning?.let { meaning ->
                                     SemanticMeaningCard(
-                                        meaning        = meaning,
-                                        sourceLangName = s.result.detectedLang.displayName,
-                                        targetLangName = s.result.targetLang.displayName
+                                        meaning            = meaning,
+                                        sourceLangName     = s.result.detectedLang.displayName,
+                                        targetLangName     = s.result.targetLang.displayName,
+                                        targetLangMeaning  = s.result.meaningInTarget ?: meaning.meaningInTarget
                                     )
                                 }
                             }
                         }
                     }
 
-                    // ── Error ──────────────────────────────────────────────────
+                    // ── Error ──────────────────────────────────────────────
                     AnimatedVisibility(visible = state is TranslatorState.Error) {
                         val msg = (state as? TranslatorState.Error)?.message ?: ""
                         ErrorBanner(msg)
                     }
 
-                    // ── Recent translations ────────────────────────────────────
+                    // ── Recent translations ────────────────────────────────
                     if (recent.isNotEmpty() && state is TranslatorState.Idle) {
                         RecentTranslationsSection(
                             recent  = recent,
@@ -163,7 +217,7 @@ fun SmartTextTranslatorScreen(
                 }
             }
 
-            // ── Language picker overlay ─────────────────────────────────────────
+            // ── Language picker overlay ────────────────────────────────────
             AnimatedVisibility(
                 visible  = showLangPicker != null,
                 enter    = slideInVertically { it } + fadeIn(),
@@ -209,6 +263,91 @@ private fun TranslatorTopBar(onBack: () -> Unit) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// IMAGE SOURCE ROW (Camera | Gallery)
+// ══════════════════════════════════════════════════════════════════════════════
+
+@Composable
+private fun ImageSourceRow(onCamera: () -> Unit, onGallery: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        ImageSourceButton(
+            icon    = "📷",
+            label   = "Camera",
+            color   = NeonCyan,
+            modifier = Modifier.weight(1f),
+            onClick = onCamera
+        )
+        ImageSourceButton(
+            icon    = "🖼️",
+            label   = "Gallery",
+            color   = NeonPurple,
+            modifier = Modifier.weight(1f),
+            onClick = onGallery
+        )
+    }
+}
+
+@Composable
+private fun ImageSourceButton(icon: String, label: String, color: Color, modifier: Modifier, onClick: () -> Unit) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(color.copy(0.10f))
+            .border(1.dp, color.copy(0.35f), RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(icon, fontSize = 16.sp)
+            Text(label, style = MaterialTheme.typography.labelMedium, color = color, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// OCR STATUS BANNERS
+// ══════════════════════════════════════════════════════════════════════════════
+
+@Composable
+private fun OcrProcessingBanner() {
+    val inf   = rememberInfiniteTransition(label = "ocr")
+    val alpha by inf.animateFloat(0.4f, 1f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "a")
+    Row(
+        modifier = Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(NeonCyan.copy(0.10f))
+            .border(1.dp, NeonCyan.copy(0.3f), RoundedCornerShape(12.dp))
+            .padding(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = NeonCyan, strokeWidth = 2.dp)
+        Text("Extracting text from image...", style = MaterialTheme.typography.bodySmall, color = NeonCyan.copy(alpha = alpha))
+    }
+}
+
+@Composable
+private fun OcrSuccessBanner(onDismiss: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(NeonGreen.copy(0.10f))
+            .border(1.dp, NeonGreen.copy(0.35f), RoundedCornerShape(12.dp))
+            .clickable(onClick = onDismiss)
+            .padding(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("✓", fontSize = 14.sp, color = NeonGreen, fontWeight = FontWeight.Bold)
+        Text("Text extracted from image — translating…", style = MaterialTheme.typography.bodySmall, color = NeonGreen, modifier = Modifier.weight(1f))
+        Text("✕", fontSize = 11.sp, color = NeonGreen.copy(0.7f))
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // LANGUAGE SELECTOR ROW
 // ══════════════════════════════════════════════════════════════════════════════
 
@@ -232,7 +371,6 @@ private fun LanguageSelectorRow(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically
     ) {
-        // Source language button
         LangButton(
             lang      = if (isAutoDetect) Language("auto", "Auto-detect", "🌐", "Auto") else sourceLang,
             isActive  = true,
@@ -240,7 +378,6 @@ private fun LanguageSelectorRow(
             onClick   = onSourceClick
         )
 
-        // Swap + Auto-detect
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Box(
                 modifier = Modifier.size(36.dp).clip(CircleShape)
@@ -258,7 +395,6 @@ private fun LanguageSelectorRow(
             ) { Text("Auto", style = MaterialTheme.typography.labelSmall, color = if (isAutoDetect) NeonBlue else MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold) }
         }
 
-        // Target language button
         LangButton(
             lang    = targetLang,
             isActive = false,
@@ -317,7 +453,6 @@ private fun TranslatorInputCard(
             .border(1.dp, NeonBlue.copy(0.3f), RoundedCornerShape(20.dp))
     ) {
         Column {
-            // Lang label
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically
@@ -335,14 +470,13 @@ private fun TranslatorInputCard(
             }
             HorizontalDivider(color = NeonBlue.copy(0.15f))
 
-            // Text field
             OutlinedTextField(
                 value         = text,
                 onValueChange = onChange,
                 modifier      = Modifier.fillMaxWidth().heightIn(min = 100.dp, max = 200.dp),
                 placeholder   = {
                     Text(
-                        "Enter text to translate...",
+                        "Enter text to translate…",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f)
                     )
@@ -361,7 +495,6 @@ private fun TranslatorInputCard(
 
             HorizontalDivider(color = NeonBlue.copy(0.15f))
 
-            // Footer
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically
@@ -399,16 +532,17 @@ private fun TranslatingIndicator(label: String) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// TRANSLATION RESULT CARD
+// TRANSLATION RESULT CARD (enhanced — with source + target TTS)
 // ══════════════════════════════════════════════════════════════════════════════
 
 @Composable
 private fun TranslationResultCard(
-    result:  TranslationResult,
-    onSpeak: () -> Unit,
-    onCopy:  () -> Unit,
-    onShare: () -> Unit,
-    onSave:  () -> Unit
+    result:    TranslationResult,
+    onSpeakSrc: () -> Unit,
+    onSpeak:   () -> Unit,
+    onCopy:    () -> Unit,
+    onShare:   () -> Unit,
+    onSave:    () -> Unit
 ) {
     val ext = MaterialTheme.extended
     Box(
@@ -452,19 +586,48 @@ private fun TranslationResultCard(
                 }
             }
 
-            // Meaning in Original Language (CRITICAL)
+            // Meaning in Source Language
             result.nativeMeaning?.let { meaning ->
-                HorizontalDivider(color = NeonPurple.copy(0.10f))
+                HorizontalDivider(color = NeonBlue.copy(0.10f))
                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp)) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment     = Alignment.CenterVertically
-                    ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("💡", fontSize = 12.sp)
                         Text(
                             "Meaning in ${result.detectedLang.displayName}:",
                             style = MaterialTheme.typography.labelSmall,
                             color = NeonBlue,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(Modifier.weight(1f))
+                        // Speak source text
+                        Box(
+                            Modifier.size(24.dp).clip(CircleShape)
+                                .background(NeonBlue.copy(0.12f))
+                                .border(1.dp, NeonBlue.copy(0.3f), CircleShape)
+                                .clickable(onClick = onSpeakSrc),
+                            Alignment.Center
+                        ) { Text("🔊", fontSize = 11.sp) }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = meaning,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
+                        lineHeight = 20.sp
+                    )
+                }
+            }
+
+            // Meaning in Target Language
+            result.meaningInTarget?.let { meaning ->
+                HorizontalDivider(color = NeonCyan.copy(0.10f))
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("🎯", fontSize = 12.sp)
+                        Text(
+                            "Meaning in ${result.targetLang.displayName}:",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = NeonCyan,
                             fontWeight = FontWeight.Bold
                         )
                     }
@@ -475,6 +638,33 @@ private fun TranslationResultCard(
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
                         lineHeight = 20.sp
                     )
+                }
+            }
+
+            // Meaning in English (if source and target are not English)
+            val srcCode = result.detectedLang.code
+            val tgtCode = result.targetLang.code
+            if (srcCode != "en" && tgtCode != "en") {
+                result.semanticMeaning?.meaningEnglish?.let { engMeaning ->
+                    HorizontalDivider(color = Color(0xFF4CAF50).copy(0.10f))
+                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("🇺🇸", fontSize = 12.sp)
+                            Text(
+                                "Meaning in English:",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color(0xFF81C784),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = engMeaning,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.80f),
+                            lineHeight = 18.sp
+                        )
+                    }
                 }
             }
 
@@ -492,31 +682,6 @@ private fun TranslationResultCard(
 private fun ActionChip(icon: String, onClick: () -> Unit) {
     Box(Modifier.size(28.dp).clip(CircleShape).background(MaterialTheme.extended.glassCard).border(1.dp, MaterialTheme.extended.glassBorder, CircleShape).clickable(onClick = onClick), Alignment.Center) {
         Text(icon, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface)
-    }
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// EXPLANATION CARD
-// ══════════════════════════════════════════════════════════════════════════════
-
-@Composable
-private fun ExplanationCard(text: String) {
-    val ext = MaterialTheme.extended
-    Box(
-        modifier = Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(NeonBlue.copy(0.06f))
-            .border(1.dp, NeonBlue.copy(0.2f), RoundedCornerShape(16.dp))
-            .padding(14.dp)
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("🤖", fontSize = 14.sp)
-                Text("AI Context & Meaning", style = MaterialTheme.typography.labelMedium, color = NeonBlue, fontWeight = FontWeight.SemiBold)
-            }
-            HorizontalDivider(color = NeonBlue.copy(0.15f))
-            Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface, lineHeight = 20.sp)
-        }
     }
 }
 
@@ -586,7 +751,6 @@ fun LanguagePickerSheet(
             .border(1.dp, ext.glassBorder, RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
             .navigationBarsPadding()
     ) {
-        // Drag handle + header
         Box(Modifier.padding(top = 10.dp).width(40.dp).height(4.dp).clip(CircleShape).background(NeonBlue.copy(0.4f)).align(Alignment.CenterHorizontally))
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
@@ -601,7 +765,6 @@ fun LanguagePickerSheet(
             }
         }
 
-        // Search bar
         OutlinedTextField(
             value         = query,
             onValueChange = { query = it },

@@ -10,6 +10,8 @@ import android.net.wifi.WifiNetworkSuggestion
 import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.smartvision.ai.data.ScreenContext
+import com.smartvision.ai.data.ScreenContextManager
 import com.smartvision.ai.data.repository.HistoryRepository
 import com.smartvision.ai.qr.data.QrScannerRepository
 import com.smartvision.ai.qr.domain.*
@@ -28,6 +30,7 @@ import javax.inject.Inject
 class QrScannerViewModel @Inject constructor(
     private val repo:        QrScannerRepository,
     private val historyRepo: HistoryRepository,
+    private val screenContextManager: ScreenContextManager,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -57,6 +60,15 @@ class QrScannerViewModel @Inject constructor(
                         _scanState.value = QrScanState.Success(code)
                         addToHistory(code)
                         saveHistory(code)
+                        // Emit context for floating AI assistant
+                        screenContextManager.updateContext(
+                            ScreenContext.QrContext(
+                                content = code.displayValue,
+                                type = code.contentType.name,
+                                rawValue = code.rawValue
+                            ),
+                            moduleName = "QR Scanner"
+                        )
                         // Cooldown: prevent re-scan for 3 seconds
                         cooldownJob?.cancel()
                         cooldownJob = viewModelScope.launch { delay(3000); if (_scanState.value is QrScanState.Success) resumeScan() }
@@ -102,6 +114,14 @@ class QrScannerViewModel @Inject constructor(
         runCatching { context.startActivity(intent) }
     }
 
+    fun payWithUpi(upiUri: String) {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(upiUri)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching {
+            val chooser = Intent.createChooser(intent, "Pay with UPI").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(chooser)
+        }
+    }
+
     fun shareText(text: String) {
         val intent = Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, text) }
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -133,10 +153,23 @@ class QrScannerViewModel @Inject constructor(
     }
 
     private suspend fun saveHistory(code: ScannedCode) {
+        val qrJson = com.smartvision.ai.domain.model.HistoryJsonSerializer.serializeQr(
+            com.smartvision.ai.domain.model.QrHistoryDetail(
+                rawValue = code.rawValue,
+                displayValue = code.displayValue,
+                contentType = code.contentType.name,
+                formatName = code.formatName,
+                wifiSsid = code.wifiInfo?.ssid,
+                wifiPassword = code.wifiInfo?.password,
+                wifiSecurity = code.wifiInfo?.security,
+                timestamp = code.timestamp
+            )
+        )
         historyRepo.save(
             "QR Scan",
             "${code.contentType.emoji} ${code.contentType.displayName}",
-            code.displayValue.take(220)
+            code.displayValue.take(220),
+            qrJson
         )
     }
 }

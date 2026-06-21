@@ -44,12 +44,13 @@ fun languageByCode(code: String): Language =
     ALL_LANGUAGES.find { it.code == code } ?: ALL_LANGUAGES.first()
 
 data class SemanticMeaning(
-    val meaningEnglish: String,
+    val meaningEnglish:  String,
     val meaningOriginal: String,
+    val meaningInTarget: String? = null,   // meaning written in the TARGET language
     val contextExplanation: String,
-    val usageExplanation: String,
-    val pronunciation: String? = null,
-    val isOfflineMode: Boolean = false
+    val usageExplanation:   String,
+    val pronunciation:   String? = null,
+    val isOfflineMode:   Boolean = false
 )
 
 // ─── Translation Result ────────────────────────────────────────────────────────
@@ -62,6 +63,7 @@ data class TranslationResult(
     val pronunciation:   String? = null,
     val characterCount:  Int     = originalText.length,
     val nativeMeaning:   String? = null,
+    val meaningInTarget: String? = null,   // meaning in the target language
     val semanticMeaning: SemanticMeaning? = null,
     val isOfflineMode:   Boolean = false
 )
@@ -76,6 +78,7 @@ data class ConversationEntry(
     val targetLang:     Language,
     val isUserSide:     Boolean = true,              // true = left mic, false = right mic
     val nativeMeaning:  String? = null,
+    val meaningInTarget: String? = null,
     val semanticMeaning: SemanticMeaning? = null
 )
 
@@ -91,4 +94,13 @@ sealed class TranslatorState {
 
 enum class VoiceListeningState {
     IDLE, LISTENING, PROCESSING
+}
+
+// ─── OCR Input State (for image → text extraction in Smart Translator) ────────
+
+sealed class OcrInputState {
+    object Idle                          : OcrInputState()
+    object Processing                    : OcrInputState()
+    data class Success(val text: String, val meaningInTarget: String? = null) : OcrInputState()
+    data class Error(val message: String): OcrInputState()
 }

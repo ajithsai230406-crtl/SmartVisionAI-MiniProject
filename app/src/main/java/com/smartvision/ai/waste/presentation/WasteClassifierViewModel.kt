@@ -6,6 +6,8 @@ import android.net.Uri
 import android.speech.tts.TextToSpeech
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.smartvision.ai.data.ScreenContext
+import com.smartvision.ai.data.ScreenContextManager
 import com.smartvision.ai.data.repository.FirebaseRepository
 import com.smartvision.ai.data.repository.HistoryRepository
 import com.smartvision.ai.waste.data.WasteClassifierRepository
@@ -23,6 +25,7 @@ class WasteClassifierViewModel @Inject constructor(
     private val repo:        WasteClassifierRepository,
     private val historyRepo: HistoryRepository,
     private val firebase:    FirebaseRepository,
+    private val screenContextManager: ScreenContextManager,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -50,6 +53,19 @@ class WasteClassifierViewModel @Inject constructor(
 
     init { tts = TextToSpeech(context) { /* ready */ } }
 
+    private fun saveBitmapToCache(bitmap: Bitmap): String? {
+        return try {
+            val file = java.io.File(context.cacheDir, "waste_${System.currentTimeMillis()}.jpg")
+            java.io.FileOutputStream(file).use { out ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
+            }
+            file.absolutePath
+        } catch (e: Exception) {
+            android.util.Log.e("WasteClassifier", "Failed to save bitmap to cache", e)
+            null
+        }
+    }
+
     /**
      * Real-time live frame classification.
      * Called by PreviewView bitmap polling in the screen.
@@ -73,12 +89,11 @@ class WasteClassifierViewModel @Inject constructor(
         liveFrameJob = viewModelScope.launch {
             android.util.Log.d("WasteClassifier", "Starting live classification on frame hash: $currentHash")
             repo.classifyFromBitmap(bitmap, isLive = true)
-                .onSuccess { result ->
-                    android.util.Log.d("WasteClassifier", "Live frame prediction generated: ${result.exactItemName} (${(result.confidence * 100).toInt()}%)")
-                    _liveResult.value = result
-                    // Transition to Classified so result panel shows live
-                    if (_scanState.value is WasteScanState.Idle) {
-                        _scanState.value = WasteScanState.Classified(result)
+                .onSuccess { results ->
+                    if (results.isNotEmpty()) {
+                        val result = results[0]
+                        android.util.Log.d("WasteClassifier", "Live frame prediction generated: ${result.exactItemName} (${(result.confidence * 100).toInt()}%)")
+                        _liveResult.value = result
                     }
                 }
                 .onFailure { e ->
@@ -91,12 +106,24 @@ class WasteClassifierViewModel @Inject constructor(
     fun captureAndClassify(bitmap: Bitmap) = viewModelScope.launch {
         android.util.Log.d("WasteClassifier", "Manual capture frame received for classification.")
         _scanState.value = WasteScanState.Scanning
+        
+        val cachedPath = saveBitmapToCache(bitmap)
+        
         repo.classifyFromBitmap(bitmap, isLive = false)
-            .onSuccess { result ->
-                android.util.Log.d("WasteClassifier", "Manual prediction generated: ${result.exactItemName} (${(result.confidence * 100).toInt()}%)")
-                _scanState.value = WasteScanState.Classified(result)
-                addToHistory(result)
-                saveToFirebase(result)
+            .onSuccess { results ->
+                val filtered = results.filter { it.confidence >= 0.60f }
+                if (filtered.isEmpty()) {
+                    _scanState.value = WasteScanState.Error("Unable to classify confidently. Please rescan.")
+                    return@onSuccess
+                }
+
+                val updatedResults = filtered.map { it.copy(imagePath = cachedPath) }
+                _scanState.value = WasteScanState.Classified(updatedResults, selectedIndex = 0)
+                
+                val primaryResult = updatedResults[0]
+                addToHistory(primaryResult)
+                saveToFirebase(primaryResult)
+                updateAssistantContext(primaryResult)
             }
             .onFailure { e ->
                 android.util.Log.e("WasteClassifier", "Manual classification failed", e)
@@ -106,13 +133,62 @@ class WasteClassifierViewModel @Inject constructor(
 
     fun analyzeFromUri(context: Context, uri: Uri) = viewModelScope.launch {
         _scanState.value = WasteScanState.Scanning
+        val bitmap = try {
+            val source = android.graphics.ImageDecoder.createSource(context.contentResolver, uri)
+            android.graphics.ImageDecoder.decodeBitmap(source)
+        } catch (e: Exception) {
+            null
+        }
+        if (bitmap == null) {
+            _scanState.value = WasteScanState.Error("Failed to load image from gallery.")
+            return@launch
+        }
+        val cachedPath = saveBitmapToCache(bitmap)
+
         repo.classifyFromUri(context, uri)
-            .onSuccess { result ->
-                _scanState.value = WasteScanState.Classified(result)
-                addToHistory(result)
-                saveToFirebase(result)
+            .onSuccess { results ->
+                val filtered = results.filter { it.confidence >= 0.60f }
+                if (filtered.isEmpty()) {
+                    _scanState.value = WasteScanState.Error("Unable to classify confidently. Please rescan.")
+                    return@onSuccess
+                }
+
+                val updatedResults = filtered.map { it.copy(imagePath = cachedPath) }
+                _scanState.value = WasteScanState.Classified(updatedResults, selectedIndex = 0)
+                
+                val primaryResult = updatedResults[0]
+                addToHistory(primaryResult)
+                saveToFirebase(primaryResult)
+                updateAssistantContext(primaryResult)
             }
             .onFailure { _scanState.value = WasteScanState.Error(it.message ?: "Failed to analyze image") }
+    }
+
+    fun selectClassifiedItem(index: Int) {
+        val currentState = _scanState.value
+        if (currentState is WasteScanState.Classified) {
+            if (index in 0 until currentState.results.size) {
+                _scanState.value = currentState.copy(selectedIndex = index)
+                updateAssistantContext(currentState.results[index])
+            }
+        }
+    }
+
+    private fun updateAssistantContext(result: WasteResult) {
+        screenContextManager.updateContext(
+            ScreenContext.WasteContext(
+                itemName = result.exactItemName.ifBlank { result.primaryType.displayName },
+                wasteType = result.primaryType.displayName,
+                confidence = result.confidence,
+                isRecyclable = result.isRecyclable,
+                disposalMethod = result.disposalMethod.ifBlank { result.primaryType.bin },
+                environmentalImpact = result.environmentalImpact.ifBlank { WasteKnowledgeBase.getKnowledge(result.primaryType).description },
+                recyclingSuggestions = result.sustainabilityTip.ifBlank { WasteKnowledgeBase.getKnowledge(result.primaryType).ecoTip },
+                safetyPrecautions = result.safetyPrecautions.ifBlank { "Handle with care." },
+                carbonImpact = result.carbonReduction
+            ),
+            moduleName = "Waste Classifier"
+        )
     }
 
     fun speakResult(result: WasteResult) {
@@ -136,10 +212,31 @@ class WasteClassifierViewModel @Inject constructor(
     private suspend fun saveToFirebase(result: WasteResult) {
         val defaultKnow = WasteKnowledgeBase.getKnowledge(result.primaryType)
 
+        val wasteHistJson = com.smartvision.ai.domain.model.HistoryJsonSerializer.serializeWaste(
+            com.smartvision.ai.domain.model.WasteHistoryDetail(
+                wasteType = result.primaryType.displayName,
+                exactItemName = result.exactItemName,
+                confidence = result.confidence,
+                disposalMethod = result.disposalMethod.ifBlank { result.primaryType.bin },
+                disposalSteps = result.disposalSteps.ifEmpty { defaultKnow.disposalSteps },
+                reuseSuggestions = result.reuseSuggestions.ifBlank { defaultKnow.reusabilityInfo },
+                environmentalImpact = result.environmentalImpact.ifBlank { defaultKnow.carbonFootprint },
+                ecoScore = result.ecoScore,
+                carbonReduction = result.carbonReduction,
+                carbonImpact = result.carbonImpact,
+                isRecyclable = result.isRecyclable,
+                isReusable = result.isReusable,
+                sustainabilityTip = result.sustainabilityTip.ifBlank { defaultKnow.ecoTip },
+                imagePath = result.imagePath,
+                safetyPrecautions = result.safetyPrecautions
+            )
+        )
+
         historyRepo.save(
             "Waste",
             "${result.primaryType.emoji} ${result.exactItemName} — ${(result.confidence * 100).toInt()}% confidence",
-            result.sustainabilityTip.ifBlank { defaultKnow.ecoTip }
+            result.sustainabilityTip.ifBlank { defaultKnow.ecoTip },
+            wasteHistJson
         )
 
         firebase.saveWasteClassification(

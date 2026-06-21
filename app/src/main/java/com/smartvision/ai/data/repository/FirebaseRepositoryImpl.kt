@@ -472,4 +472,254 @@ class FirebaseRepositoryImpl @Inject constructor(
             ).await()
         }
     }
+
+    // ── Conversation Management (ChatGPT-like) ─────────────────────────────
+
+    override suspend fun createConversation(
+        uid: String,
+        title: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val docId = UUID.randomUUID().toString()
+            val now = System.currentTimeMillis()
+            val data = hashMapOf(
+                "id" to docId,
+                "uid" to uid,
+                "title" to title,
+                "lastMessage" to "",
+                "createdAt" to now,
+                "updatedAt" to now,
+                "messageCount" to 0
+            )
+            firestore.collection("Conversations").document(docId).set(data).await()
+            docId
+        }
+    }
+
+    override suspend fun getConversations(
+        uid: String,
+        limit: Long,
+        lastTimestamp: Long?
+    ): Result<List<com.smartvision.ai.domain.model.Conversation>> = withContext(Dispatchers.IO) {
+        runCatching {
+            var query = firestore.collection("Conversations")
+                .whereEqualTo("uid", uid)
+                .orderBy("updatedAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
+                .limit(limit)
+
+            if (lastTimestamp != null) {
+                query = query.startAfter(lastTimestamp)
+            }
+
+            val snapshot = query.get().await()
+            snapshot.documents.map { doc ->
+                com.smartvision.ai.domain.model.Conversation(
+                    id = doc.getString("id") ?: doc.id,
+                    uid = doc.getString("uid") ?: "",
+                    title = doc.getString("title") ?: "New Chat",
+                    lastMessage = doc.getString("lastMessage") ?: "",
+                    createdAt = doc.getLong("createdAt") ?: 0L,
+                    updatedAt = doc.getLong("updatedAt") ?: 0L,
+                    messageCount = doc.getLong("messageCount")?.toInt() ?: 0
+                )
+            }
+        }
+    }
+
+    override suspend fun getConversationMessages(
+        conversationId: String,
+        limit: Long,
+        lastTimestamp: Long?
+    ): Result<List<com.smartvision.ai.domain.model.ConversationMessage>> = withContext(Dispatchers.IO) {
+        runCatching {
+            var query = firestore.collection("Conversations")
+                .document(conversationId)
+                .collection("Messages")
+                .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.ASCENDING)
+                .limit(limit)
+
+            if (lastTimestamp != null) {
+                query = query.startAfter(lastTimestamp)
+            }
+
+            val snapshot = query.get().await()
+            snapshot.documents.map { doc ->
+                com.smartvision.ai.domain.model.ConversationMessage(
+                    id = doc.getString("id") ?: doc.id,
+                    conversationId = conversationId,
+                    text = doc.getString("text") ?: "",
+                    fromUser = doc.getBoolean("fromUser") ?: true,
+                    timestamp = doc.getLong("timestamp") ?: 0L,
+                    attachmentType = doc.getString("attachmentType"),
+                    attachmentPreview = doc.getString("attachmentPreview")
+                )
+            }
+        }
+    }
+
+    override suspend fun saveConversationMessage(
+        conversationId: String,
+        message: com.smartvision.ai.domain.model.ConversationMessage
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val msgId = if (message.id.isNotBlank()) message.id else UUID.randomUUID().toString()
+            val data = hashMapOf(
+                "id" to msgId,
+                "conversationId" to conversationId,
+                "text" to message.text.take(8000),
+                "fromUser" to message.fromUser,
+                "timestamp" to message.timestamp,
+                "attachmentType" to message.attachmentType,
+                "attachmentPreview" to message.attachmentPreview?.take(2000)
+            )
+            firestore.collection("Conversations")
+                .document(conversationId)
+                .collection("Messages")
+                .document(msgId)
+                .set(data)
+                .await()
+
+            // Update conversation metadata
+            val updates = hashMapOf<String, Any>(
+                "updatedAt" to message.timestamp,
+                "lastMessage" to message.text.take(200),
+                "messageCount" to FieldValue.increment(1)
+            )
+            firestore.collection("Conversations")
+                .document(conversationId)
+                .set(updates, SetOptions.merge())
+                .await()
+            Unit
+        }
+    }
+
+    override suspend fun updateConversationMeta(
+        conversationId: String,
+        title: String?,
+        lastMessage: String?,
+        messageCount: Int?
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val updates = mutableMapOf<String, Any>()
+            title?.let { updates["title"] = it }
+            lastMessage?.let { updates["lastMessage"] = it.take(200) }
+            messageCount?.let { updates["messageCount"] = it }
+            updates["updatedAt"] = System.currentTimeMillis()
+
+            if (updates.isNotEmpty()) {
+                firestore.collection("Conversations")
+                    .document(conversationId)
+                    .set(updates, SetOptions.merge())
+                    .await()
+            }
+            Unit
+        }
+    }
+
+    override suspend fun deleteConversation(conversationId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            // Delete all messages in the sub-collection
+            val messagesSnapshot = firestore.collection("Conversations")
+                .document(conversationId)
+                .collection("Messages")
+                .get()
+                .await()
+            val batch = firestore.batch()
+            messagesSnapshot.documents.forEach { doc ->
+                batch.delete(doc.reference)
+            }
+            // Delete the conversation document itself
+            batch.delete(firestore.collection("Conversations").document(conversationId))
+            batch.commit().await()
+            Unit
+        }
+    }
+
+    override suspend fun searchConversations(
+        uid: String,
+        query: String
+    ): Result<List<com.smartvision.ai.domain.model.Conversation>> = withContext(Dispatchers.IO) {
+        runCatching {
+            // Firestore doesn't support full-text search, so we load recent and filter client-side
+            val snapshot = firestore.collection("Conversations")
+                .whereEqualTo("uid", uid)
+                .orderBy("updatedAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
+                .limit(100)
+                .get()
+                .await()
+
+            val lowerQuery = query.lowercase()
+            snapshot.documents.mapNotNull { doc ->
+                val title = doc.getString("title") ?: ""
+                val lastMsg = doc.getString("lastMessage") ?: ""
+                if (title.lowercase().contains(lowerQuery) || lastMsg.lowercase().contains(lowerQuery)) {
+                    com.smartvision.ai.domain.model.Conversation(
+                        id = doc.getString("id") ?: doc.id,
+                        uid = doc.getString("uid") ?: "",
+                        title = title,
+                        lastMessage = lastMsg,
+                        createdAt = doc.getLong("createdAt") ?: 0L,
+                        updatedAt = doc.getLong("updatedAt") ?: 0L,
+                        messageCount = doc.getLong("messageCount")?.toInt() ?: 0
+                    )
+                } else null
+            }
+        }
+    }
+
+    override suspend fun saveFeedback(feedback: com.smartvision.ai.domain.model.FeedbackEntry): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val docId = feedback.feedbackId.ifBlank { java.util.UUID.randomUUID().toString() }
+            val finalFeedback = feedback.copy(feedbackId = docId)
+            firestore.collection("Feedback").document(docId).set(finalFeedback).await()
+            Unit
+        }
+    }
+
+    override suspend fun getUserFeedbackHistory(email: String): Result<List<com.smartvision.ai.domain.model.FeedbackEntry>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val snapshot = firestore.collection("Feedback")
+                .whereEqualTo("email", email)
+                .get()
+                .await()
+            snapshot.toObjects(com.smartvision.ai.domain.model.FeedbackEntry::class.java)
+                .sortedByDescending { it.timestamp }
+        }
+    }
+
+    override suspend fun getAllFeedback(): Result<List<com.smartvision.ai.domain.model.FeedbackEntry>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val snapshot = firestore.collection("Feedback")
+                .get()
+                .await()
+            snapshot.toObjects(com.smartvision.ai.domain.model.FeedbackEntry::class.java)
+                .sortedByDescending { it.timestamp }
+        }
+    }
+
+    override suspend fun updateFeedbackStatus(feedbackId: String, status: String): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            firestore.collection("Feedback").document(feedbackId)
+                .update("status", status)
+                .await()
+            Unit
+        }
+    }
+
+    override suspend fun updateFeedback(feedback: com.smartvision.ai.domain.model.FeedbackEntry): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            firestore.collection("Feedback").document(feedback.feedbackId)
+                .set(feedback, SetOptions.merge())
+                .await()
+            Unit
+        }
+    }
+
+    override suspend fun deleteFeedback(feedbackId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            firestore.collection("Feedback").document(feedbackId).delete().await()
+            Unit
+        }
+    }
 }
+

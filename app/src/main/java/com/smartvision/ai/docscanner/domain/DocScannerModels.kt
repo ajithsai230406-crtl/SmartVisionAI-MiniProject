@@ -31,6 +31,7 @@ data class ScannedDocument(
     val id:           Long         = System.currentTimeMillis(),
     val name:         String       = "Document_${System.currentTimeMillis()}",
     val pages:        List<Uri>,
+    val originalPages: List<Uri>   = pages,
     val pageCount:    Int          = pages.size,
     val filter:       DocumentFilter = DocumentFilter.ORIGINAL,
     val exportFormat: ExportFormat = ExportFormat.PDF,
